@@ -4,8 +4,6 @@ import { observer } from "mobx-react-lite";
 import VideoPlayer from "./VideoPlayer";
 import Timeline from "./Timeline";
 import SelectionToolbar from "../SharedComponent/SelectionToolbar";
-import SelectionOverlay from "../SharedComponent/SelectionOverlay";
-import useCanvasInteraction from "../hooks/useCanvasInteraction";
 import {
   useCanvasStore,
   useCanvasStoreReactive,
@@ -82,9 +80,9 @@ function RealEditor({ ClipsData }) {
   const [lastCanvasClick, setLastCanvasClick] = useState(null);
   const toolbarRef = useRef(null);
   const videoPlayerContainerRef = useRef(null);
-  const canvasRef = useRef(null);
+  // const canvasRef = useRef(null);
 
-  const getFitRef = useRef(null);
+  // const getFitRef = useRef(null);
   const EPS = 0.002;
   const MAX_DT = 0.05;
   const justSeekedIntoImageRef = useRef(false);
@@ -129,20 +127,19 @@ function RealEditor({ ClipsData }) {
 
   // const canvas = useCanvasStoreReactive();
 
-  const { activeBlock, canvasRect, selectBlock } = useCanvasSelection({
+  const { activeBlock, selectBlock } = useCanvasSelection({
     store: canvasStore,
-    canvasRef,
     isGroupId: canvasStore.isGroupId,
   });
 
-  const { beginInteraction } = useCanvasInteraction({
-    store: canvasStore,
-    pageId,
-    getFit: () => getFitRef.current?.(),
-    commit: (info) => {
-      console.log("COMMIT", info);
-    },
-  });
+  // const { beginInteraction } = useCanvasInteraction({
+  //   store: canvasStore,
+  //   pageId,
+  //   getFit: () => getFitRef.current?.(),
+  //   commit: (info) => {
+  //     console.log("COMMIT", info);
+  //   },
+  // });
 
   // ---- new: track last manual selection so auto-select won't instantly override
   const lastManualSelectRef = useRef(0);
@@ -1531,16 +1528,33 @@ function RealEditor({ ClipsData }) {
   // console.log("selectedBlock style:", selectedBlock?.fontSize);
   // console.log("selectedBlock full:", JSON.parse(JSON.stringify(selectedBlock)));
 
+  // useEffect(() => {
+  //   const api = videoPlayerContainerRef.current;
+  //   if (!api) return;
+
+  //   const el = api.getCanvasEl?.();
+  //   if (!el) return;
+
+  //   // canvasRef.current = el;
+  //   getFitRef.current = api.getFit;
+  // }, []);
+
   useEffect(() => {
+    setToolbarVisible(!!canvasStore.selectionMode);
+  }, [canvasStore.selectionMode]);
+
+  useEffect(() => {
+    if (!activeBlock) return;
+
     const api = videoPlayerContainerRef.current;
-    if (!api) return;
+    const rect = api?.getCanvasRect?.();
+    if (!rect) return;
 
-    const el = api.getCanvasEl?.();
-    if (!el) return;
-
-    canvasRef.current = el;
-    getFitRef.current = api.getFit;
-  }, []);
+    setToolbarAnchor({
+      left: Math.round(rect.left + rect.width / 2),
+      top: Math.round(rect.top - 48),
+    });
+  }, [activeBlock]);
 
   // useEffect(() => {
   //   canvasRef.current = canvasEl;
@@ -1548,24 +1562,18 @@ function RealEditor({ ClipsData }) {
   // const [canvasEl, setCanvasEl] = useState(null);
 
   useEffect(() => {
-    if (!canvasRect) return;
+    if (!activeBlock) return;
+    console.log("activeBlock", activeBlock);
+    {
+      console.log(
+        "BLOCK AFTER BOLD",
+        JSON.parse(
+          JSON.stringify(canvasStore.getBlockById(canvasStore.selectedIds[0]))
+        )
+      );
+    }
+  }, [activeBlock]);
 
-    setToolbarAnchor({
-      left: Math.round(canvasRect.left + canvasRect.width / 2),
-      top: Math.round(canvasRect.top - 48), // fixed offset above canvas
-    });
-  }, [canvasRect]);
-
-  console.log("canvasRect***", canvasRect);
-  console.log("activeBlock**********", activeBlock);
-  {
-    console.log(
-      "BLOCK AFTER BOLD",
-      JSON.parse(
-        JSON.stringify(canvasStore.getBlockById(canvasStore.selectedIds[0]))
-      )
-    );
-  }
   return (
     <div className=" bg-white text-gray-900 font-sans w-full flex flex-col items-center justify-center">
       <div className="container  max-w-[1000px] xxl:max-w-[1200px] px-6 py-0  !w-full">
@@ -1588,25 +1596,6 @@ function RealEditor({ ClipsData }) {
             onToolbarClose={() => setToolbarVisible(false)}
           />
         </div>
-
-        {activeBlock && canvasRect && (
-          <SelectionOverlay
-            block={activeBlock}
-            canvasRect={canvasRect}
-            beginInteraction={beginInteraction}
-            onSelect={selectBlock}
-            cornerHandles={cornerHandles}
-            getFit={getFitRef.current}
-            sideHandles={
-              activeBlock.type === "text" ? textSideHandles : imageSideHandles
-            }
-          />
-        )}
-        {/* {console.log("TOOLBAR STATE", {
-          mode: canvasStore.selectionMode,
-          activeRect: canvasStore.activeRect,
-          canvasRect: canvasStore.canvasRect,
-        })} */}
 
         {toolbarVisible && (
           <div

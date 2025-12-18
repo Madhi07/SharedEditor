@@ -65,11 +65,10 @@ export function CanvasStoreProvider({
     // Defaults per editor: change here to tune logical canvas sizes
     const defaultLogicalForEditor = (() => {
       if (editor === "video") {
-        // full HD logical canvas for video editor
-        return { width: 1920, height: 1080 };
+        return { width: 720, height: 358 }; // FIXED size
       }
       if (editor === "Reels") {
-        return { width:1080, height: 1920 };
+        return { width: 1080, height: 1920 };
       }
       if (editor === "infographics") {
         // portrait infographic default logical size

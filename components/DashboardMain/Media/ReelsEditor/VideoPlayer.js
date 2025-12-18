@@ -4,9 +4,16 @@ import "video.js/dist/video-js.css";
 import { Play, Pause } from "lucide-react";
 import BlockRenderer from "./BlockRenderer";
 import { useCanvasStore } from "../context/CanvasStoreContext";
-import { computeMediaFit } from "../utils/canvasUtils/canvasConfig";
+import SelectionOverlay from "../SharedComponent/SelectionOverlay";
 import { forwardRef } from "react";
 import { useImperativeHandle } from "react";
+import {
+  cornerHandles,
+  textSideHandles,
+  imageSideHandles,
+} from "../utils/canvasUtils/canvasConfig";
+import useCanvasInteraction from "../hooks/useCanvasInteraction";
+import useCanvasSelection from "../hooks/useCanvasSelection";
 
 const VideoPlayer = forwardRef(function VideoPlayer(
   {
@@ -32,15 +39,17 @@ const VideoPlayer = forwardRef(function VideoPlayer(
   const [localTime, setLocalTime] = useState(0);
   const [isPlayerReady, setIsPlayerReady] = useState(false);
   const [audioContext, setAudioContext] = useState(null);
-
+  const stageRef = useRef(null);
+  const stageContainerRef = useRef(null);
+  const store = useCanvasStore();
   // overlay ref used to compute the player rect for toolbar anchoring
   const overlayRef = useRef(null);
-  useImperativeHandle(containerRef, () => ({
-    getCanvasEl: () => overlayRef.current,
-    getFit,
-  }));
 
-  const safeZoom = Math.min(Math.max(zoom, 0.5), 3);
+  const { selectBlock, activeBlock, selectedIds } = useCanvasSelection({
+    store,
+  });
+
+  // const safeZoom = Math.min(Math.max(zoom, 0.5), 3);
 
   // Refs to hold the latest callbacks/values
   const onTimeUpdateRef = useRef(onTimeUpdate);
@@ -332,15 +341,14 @@ const VideoPlayer = forwardRef(function VideoPlayer(
       ? duration // snap to full duration (0:11)
       : currentTime;
 
-  const [fit, setFit] = useState({
-    sx: 1,
-    sy: 1,
-    logicalSize: { width: 1, height: 1 },
-    canvasSize: { width: 1, height: 1 },
-  });
+  // const [fit, setFit] = useState({
+  //   sx: 1,
+  //   sy: 1,
+  //   logicalSize: { width: 1, height: 1 },
+  //   canvasSize: { width: 1, height: 1 },
+  // });
 
   const [, setTick] = useState(0);
-  const store = useCanvasStore();
 
   useEffect(() => {
     if (!store || typeof store.subscribe !== "function") return;
@@ -348,37 +356,64 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     return unsub;
   }, [store]);
 
-  useEffect(() => {
-    if (!overlayRef.current || !store) return;
+  // useEffect(() => {
+  //   if (!overlayRef.current || !store) return;
 
-    function recomputeFit() {
-      const rect = overlayRef.current.getBoundingClientRect();
-      if (!rect) return;
+  //   function recomputeFit() {
+  //     const rect = overlayRef.current.getBoundingClientRect();
+  //     if (!rect) return;
 
-      const logical = store.getPageLogicalSize?.(pageId) ??
-        store.project?.pages?.find((p) => p.id === pageId)?.meta
-          ?.logicalSize ?? { width: 1920, height: 1080 }; // final fallback
+  //     const logical = store.getPageLogicalSize?.(pageId) ??
+  //       store.project?.pages?.find((p) => p.id === pageId)?.meta
+  //         ?.logicalSize ?? { width: 1920, height: 1080 }; // final fallback
 
-      const fitObj = computeMediaFit(
-        { left: 0, top: 0, width: rect.width, height: rect.height },
-        logical,
-        "contain"
-      );
+  //     const fitObj = computeMediaFit(
+  //       { left: 0, top: 0, width: rect.width, height: rect.height },
+  //       logical,
+  //       "contain"
+  //     );
 
-      setFit({
-        sx: fitObj.scaleX,
-        sy: fitObj.scaleY,
-        logicalSize: logical,
-        canvasSize: { width: rect.width, height: rect.height },
-      });
-    }
+  //     setFit({
+  //       sx: fitObj.scaleX,
+  //       sy: fitObj.scaleY,
+  //       logicalSize: logical,
+  //       canvasSize: { width: rect.width, height: rect.height },
+  //     });
+  //   }
 
-    recomputeFit();
-    window.addEventListener("resize", recomputeFit);
-    return () => window.removeEventListener("resize", recomputeFit);
-  }, [store, pageId]);
+  //   recomputeFit();
+  //   window.addEventListener("resize", recomputeFit);
+  //   return () => window.removeEventListener("resize", recomputeFit);
+  // }, [store, pageId]);
 
-  const getFit = useCallback(() => fit, [fit]);
+  const logical = store.getPageLogicalSize?.(pageId) ?? {
+    width: 1,
+    height: 1,
+  };
+
+  const getFit = useCallback(() => {
+    return {
+      sx: 1,
+      sy: 1,
+      renderWidth: logical.width,
+      renderHeight: logical.height,
+      offsetX: 0,
+      offsetY: 0,
+      logicalSize: {
+        width: logical.width,
+        height: logical.height,
+      },
+    };
+  }, [logical.width, logical.height]);
+
+  useImperativeHandle(containerRef, () => ({
+    getCanvasEl: () => overlayRef.current,
+    getFit,
+    getCanvasRect: () => {
+      if (!overlayRef.current) return null;
+      return overlayRef.current.getBoundingClientRect();
+    },
+  }));
 
   // Helper: read blocks for this page
   const getBlocks = () => {
@@ -397,30 +432,41 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     console.log("Overlay parent:", overlayRef.current.offsetParent);
   }, []);
 
+  // useEffect(() => {
+  //   console.log("VIDEO FIT", fit);
+  // }, [fit]);
+
   useEffect(() => {
-    console.log("VIDEO FIT", fit);
-  }, [fit]);
+    const fit = getFit();
+    console.log("FIT CHECK", fit);
+  }, [getFit]);
 
   const blocks = getBlocks();
 
-  // Filter blocks to text blocks that should be visible at currentTime
-  const visibleTextBlocks = (blocks || []).filter((b) => {
-    if (!b) return false;
-    if (b.type !== "text") return false;
-    // If block has time constraints, obey them. If duration is Infinity treat as always visible.
-    const start = typeof b.startTime === "number" ? b.startTime : 0;
-    const dur =
-      typeof b.duration === "number"
-        ? b.duration
-        : typeof b.endTime === "number"
-        ? b.endTime - start
-        : Infinity;
-    const inTime =
-      typeof currentTime === "number"
-        ? currentTime >= start && currentTime < start + dur
-        : true;
-    return inTime;
+  const { beginInteraction } = useCanvasInteraction({
+    store,
+    pageId,
+    getFit,
   });
+
+  // // Filter blocks to text blocks that should be visible at currentTime
+  // const visibleTextBlocks = (blocks || []).filter((b) => {
+  //   if (!b) return false;
+  //   if (b.type !== "text") return false;
+  //   // If block has time constraints, obey them. If duration is Infinity treat as always visible.
+  //   const start = typeof b.startTime === "number" ? b.startTime : 0;
+  //   const dur =
+  //     typeof b.duration === "number"
+  //       ? b.duration
+  //       : typeof b.endTime === "number"
+  //       ? b.endTime - start
+  //       : Infinity;
+  //   const inTime =
+  //     typeof currentTime === "number"
+  //       ? currentTime >= start && currentTime < start + dur
+  //       : true;
+  //   return inTime;
+  // });
 
   const handleOverlayPointerDown = (e) => {
     // ✅ IMPORTANT: only handle true canvas clicks
@@ -459,10 +505,20 @@ const VideoPlayer = forwardRef(function VideoPlayer(
   return (
     <div
       ref={containerRef}
-      className="flex flex-col items-center justify-center bg-white rounded-lg p-4 w-[80%] h-[66vh]"
+      className="flex flex-col items-center justify-center bg-white rounded-lg p-2 w-[80%] h-[430px] mt-5"
     >
       {/* Video Display */}
-      <div className="relative w-full max-w-4xl h-[80%] rounded-lg overflow-hidden mb-2 flex items-center justify-center bg-black">
+      <div
+        ref={stageContainerRef}
+        style={{
+          position: "relative",
+          width: logical.width,
+          height: logical.height,
+          background: "black",
+          overflow: "hidden",
+        }}
+        className=" rounded-lg mb-2 flex items-center justify-center"
+      >
         <div className="w-full h-full flex items-center justify-center">
           {/* Keep video element mounted for Video.js stability */}
           <video
@@ -472,7 +528,6 @@ const VideoPlayer = forwardRef(function VideoPlayer(
             preload="auto"
             muted
           />
-
           {/* Image overlay shown when current clip is an image */}
           {currentClip?.type === "image" && (
             <img
@@ -482,46 +537,62 @@ const VideoPlayer = forwardRef(function VideoPlayer(
               style={{ backgroundColor: "black" }}
             />
           )}
-
           {/* ------------------------------------------------------------- */}
           {/*                    CANVAS CLICK LAYER                        */}
           {/* ------------------------------------------------------------- */}
           <div
-            ref={overlayRef}
-            className="absolute inset-0 z-20"
+            ref={stageRef}
             style={{
+              position: "absolute",
+              inset: 0,
               pointerEvents: "auto",
-              background: "transparent",
             }}
-            onPointerDown={handleOverlayPointerDown}
           >
-            {/* Render blocks via BlockRenderer (which registers refs + overlays) */}
-            {(blocks || []).map((b) => {
-              // optional: keep the same time-visibility filter you had
-              const start = typeof b.startTime === "number" ? b.startTime : 0;
-              const dur =
-                typeof b.duration === "number"
-                  ? b.duration
-                  : typeof b.endTime === "number"
-                  ? b.endTime - start
-                  : Infinity;
-              const visible =
-                typeof currentTime === "number"
-                  ? currentTime >= start && currentTime < start + dur
-                  : true;
-              if (!visible) return null;
+            {/* THIS is the real canvas */}
+            <div
+              ref={overlayRef}
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 50,
+              }}
+              onPointerDown={handleOverlayPointerDown}
+            >
+              {(blocks || []).map((b) => {
+                const start = b.startTime ?? 0;
+                const dur = b.duration ?? Infinity;
+                const visible =
+                  typeof currentTime === "number"
+                    ? currentTime >= start && currentTime < start + dur
+                    : true;
+                if (!visible) return null;
 
-              return (
-                <BlockRenderer
-                  key={b.id}
-                  block={b}
-                  pageId={pageId}
-                  // canvasRef={overlayRef} // overlayRef is the absolute container — BlockRenderer needs it
-                  // fit={fit}
-                  // getFit={getFit}
+                return (
+                  <BlockRenderer
+                    key={b.id}
+                    block={b}
+                    pageId={pageId}
+                    getFit={getFit}
+                    onSelect={selectBlock}
+                  />
+                );
+              })}
+
+              {activeBlock && (
+                <SelectionOverlay
+                  block={activeBlock}
+                  beginInteraction={beginInteraction}
+                  onSelect={selectBlock}
+                  getFit={getFit}
+                  cornerHandles={cornerHandles}
+                  sideHandles={
+                    activeBlock.type === "text"
+                      ? textSideHandles
+                      : imageSideHandles
+                  }
                 />
-              );
-            })}
+              )}
+            </div>
           </div>
         </div>
       </div>

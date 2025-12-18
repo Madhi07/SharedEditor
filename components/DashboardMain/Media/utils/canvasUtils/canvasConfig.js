@@ -193,64 +193,26 @@ export const buildBlockStyle = (block) => {
   return style;
 };
 
-/**
- * computeMediaFit
- *
- * MEDIA ONLY (video / image rendering)
- * -----------------------------------
- * Computes how a logical media size fits inside a client container.
- *
- * ❌ NOT for editor interactions
- * ❌ NOT for canvas math
- * ❌ NOT for SelectionOverlay
- *
- * Returns scale + media offset inside the container.
- */
-export function computeMediaFit(
-  containerRect,
-  mediaLogicalSize,
-  mode = "contain"
-) {
-  if (!containerRect || !mediaLogicalSize) {
-    return {
-      mediaRect: { left: 0, top: 0, width: 0, height: 0 },
-      scaleX: 1,
-      scaleY: 1,
-      scale: 1,
-    };
-  }
 
-  const scaleX = containerRect.width / mediaLogicalSize.width;
-  const scaleY = containerRect.height / mediaLogicalSize.height;
+export function computeMediaFit(containerRect) {
+  const LOGICAL_W = 720;
+  const LOGICAL_H = 358;
 
-  if (mode === "stretch") {
-    return {
-      mediaRect: {
-        left: containerRect.left,
-        top: containerRect.top,
-        width: containerRect.width,
-        height: containerRect.height,
-      },
-      scaleX,
-      scaleY,
-      scale: null,
-    };
-  }
+  const scale = Math.min(
+    containerRect.width / LOGICAL_W,
+    containerRect.height / LOGICAL_H
+  );
 
-  const scale =
-    mode === "cover" ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
-
-  const width = mediaLogicalSize.width * scale;
-  const height = mediaLogicalSize.height * scale;
-
-  const left = containerRect.left + (containerRect.width - width) / 2;
-  const top = containerRect.top + (containerRect.height - height) / 2;
+  const renderWidth = LOGICAL_W * scale;
+  const renderHeight = LOGICAL_H * scale;
 
   return {
-    mediaRect: { left, top, width, height },
-    scaleX: scale,
-    scaleY: scale,
-    scale,
+    sx: scale,
+    sy: scale,
+    renderWidth,
+    renderHeight,
+    offsetX: (containerRect.width - renderWidth) / 2,
+    offsetY: (containerRect.height - renderHeight) / 2,
   };
 }
 

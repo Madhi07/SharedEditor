@@ -3,7 +3,6 @@ import React from "react";
 
 export default function SelectionOverlay({
   block,
-  canvasRect,
   beginInteraction,
   onSelect = () => {},
   canResize = true,
@@ -11,64 +10,44 @@ export default function SelectionOverlay({
   sideHandles = [],
   getFit,
 }) {
-  if (!block || !canvasRect) return null;
-
-  // const fit = getFit?.();
-  // if (!fit) return null;
-
-  // const { sx = 1, sy = 1 } = fit;
-
-  /* -------------------------------------------------
-     LOGICAL → CANVAS (single source of truth)
-     position.x / y are LOGICAL coordinates
-  ------------------------------------------------- */
+  if (!block) return null;
 
   const fit = getFit?.();
   if (!fit) return null;
 
-  const { sx = 1, sy = 1 } = fit;
+  const { sx, sy } = fit;
 
-  const width = (block.size?.width || 0) * sx;
-  const height = (block.size?.height || 0) * sy;
+  const width = block.size.width * sx;
+  const height = block.size.height * sy;
 
   if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
 
-  const cx = canvasRect.left + block.position.x * sx;
-  const cy = canvasRect.top + block.position.y * sy;
+  // block.position is already CENTER-based logical space
+  const centerX = block.position.x * sx;
+  const centerY = block.position.y * sy;
 
-  /* -------------------------------------------------
-     Transform
-  ------------------------------------------------- */
-  const transform = `
-    translate(-50%, -50%)
-    ${block.rotation ? `rotate(${block.rotation}deg)` : ""}
-    ${block.flipH ? "scaleX(-1)" : ""}
-    ${block.flipV ? "scaleY(-1)" : ""}
-  `;
-
-  /* -------------------------------------------------
-     Styles
-  ------------------------------------------------- */
   const wrapperStyle = {
-    position: "fixed",
-    left: cx,
-    top: cy,
-    width: block.size.width * sx,
-    height: block.size.height * sy,
+    position: "absolute",
+    left: centerX,
+    top: centerY,
+    width,
+    height,
     transform: `
     translate(-50%, -50%)
     ${block.rotation ? `rotate(${block.rotation}deg)` : ""}
+    ${block.flipH ? " scaleX(-1)" : ""}
+    ${block.flipV ? " scaleY(-1)" : ""}
   `,
     transformOrigin: "center",
-    zIndex: 999999,
-    outline: "1px solid #a855f7",
-    background: "rgba(255,0,0,0.1)",
+    zIndex: 9999,
+    outline: "1px solid rgba(168, 85, 247, 0.9)",
+    pointerEvents: "auto",
   };
 
   const borderStyle = {
     position: "absolute",
     inset: 0,
-    border: "1px solid #a855f7",
+    border: "1px solid rgba(168, 85, 247, 0.9)",
     boxSizing: "border-box",
     pointerEvents: "none",
   };
@@ -78,7 +57,7 @@ export default function SelectionOverlay({
     width: 12,
     height: 12,
     background: "#fff",
-    border: "2px solid #a855f7",
+    border: "2px solid rgba(168, 85, 247, 0.9)",
     borderRadius: 4,
     pointerEvents: "auto",
     boxSizing: "border-box",
@@ -91,23 +70,17 @@ export default function SelectionOverlay({
     e.preventDefault();
     e.stopPropagation();
 
-    e.target?.setPointerCapture?.(e.pointerId);
-
     beginInteraction?.(e, {
       type,
       blockId: block.id,
       handle,
-      canvasRect,
     });
   };
 
-  console.log("[SelectionOverlay]", {
-    blockId: block.id,
-    blockPos: block.position,
-    blockSize: block.size,
-    canvasRect,
-    // fit,
-    computed: { cx, cy, width, height },
+  console.log("SELECTION OVERLAY POS", {
+    centerX,
+    centerY,
+    fit,
   });
 
   /* -------------------------------------------------
@@ -118,7 +91,7 @@ export default function SelectionOverlay({
       {/* Selection border */}
       <div style={borderStyle} />
 
-      {/* ✅ MOVE BY GRABBING THE BLOCK */}
+      {/* MOVE by dragging body */}
       <div
         style={{
           position: "absolute",
@@ -138,12 +111,12 @@ export default function SelectionOverlay({
         cornerHandles.map(({ id, interaction }) => {
           const pos =
             id === "top-left"
-              ? { left: -8, top: -8, cursor: "nwse-resize" }
+              ? { left: -6, top: -6, cursor: "nwse-resize" }
               : id === "top-right"
-              ? { right: -8, top: -8, cursor: "nesw-resize" }
+              ? { right: -6, top: -6, cursor: "nesw-resize" }
               : id === "bottom-left"
-              ? { left: -8, bottom: -8, cursor: "nesw-resize" }
-              : { right: -8, bottom: -8, cursor: "nwse-resize" };
+              ? { left: -6, bottom: -6, cursor: "nesw-resize" }
+              : { right: -6, bottom: -6, cursor: "nwse-resize" };
 
           return (
             <div
@@ -162,28 +135,28 @@ export default function SelectionOverlay({
           if (id === "left")
             style = {
               ...style,
-              left: -8,
+              left: -6,
               top: "50%",
               transform: "translateY(-50%)",
             };
           if (id === "right")
             style = {
               ...style,
-              right: -8,
+              right: -6,
               top: "50%",
               transform: "translateY(-50%)",
             };
           if (id === "top")
             style = {
               ...style,
-              top: -8,
+              top: -6,
               left: "50%",
               transform: "translateX(-50%)",
             };
           if (id === "bottom")
             style = {
               ...style,
-              bottom: -8,
+              bottom: -6,
               left: "50%",
               transform: "translateX(-50%)",
             };
@@ -197,10 +170,7 @@ export default function SelectionOverlay({
           );
         })}
 
-      {/* -------------------------------------------------
-         ✅ ACTION BUTTONS
-         Move + Rotate
-      ------------------------------------------------- */}
+      {/* Action buttons */}
       <div
         style={{
           position: "absolute",
@@ -212,13 +182,13 @@ export default function SelectionOverlay({
           pointerEvents: "auto",
         }}
       >
-        {/* ROTATE — ONLY VIA BUTTON */}
+        {/* ROTATE */}
         <button
           onPointerDown={(e) => startInteraction(e, "rotate")}
           style={{
             padding: "4px 6px",
             cursor: "grab",
-            border: "1px solid #a855f7",
+            border: "1px solid rgba(168, 85, 247, 0.9)",
             background: "#fff",
             borderRadius: 4,
           }}
@@ -227,13 +197,13 @@ export default function SelectionOverlay({
           ⟳
         </button>
 
-        {/* MOVE — OPTIONAL BUTTON */}
+        {/* MOVE */}
         <button
           onPointerDown={(e) => startInteraction(e, "move")}
           style={{
             padding: "4px 6px",
             cursor: "move",
-            border: "1px solid #a855f7",
+            border: "1px solid rgba(168, 85, 247, 0.9)",
             background: "#fff",
             borderRadius: 4,
           }}

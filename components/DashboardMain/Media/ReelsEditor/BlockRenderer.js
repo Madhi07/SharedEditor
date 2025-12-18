@@ -9,7 +9,7 @@ import { observer } from "mobx-react-lite";
 import { buildBlockStyle } from "../utils/canvasUtils/canvasConfig";
 import { useCanvasStore } from "../context/CanvasStoreContext";
 
-function BlockRenderer({ block, pageId }) {
+function BlockRenderer({ block, pageId, onSelect }) {
   const store = useCanvasStore();
   const blockRef = useRef(null);
   const textBeforeEditRef = useRef("");
@@ -34,11 +34,9 @@ function BlockRenderer({ block, pageId }) {
       if (isEditing) return;
 
       e.stopPropagation();
-
-      store.select(block.id);
-      store.setSelectionMode(block.type === "text" ? "text" : "image");
+      onSelect?.(block.id);
     },
-    [block.id, block.type, store, isEditing]
+    [block.id, block.type, isEditing, onSelect]
   );
 
   /* --------------------------------------------------
@@ -47,6 +45,7 @@ function BlockRenderer({ block, pageId }) {
   const onDoubleClick = useCallback(
     (e) => {
       if (block.type !== "text") return;
+      if (store.editingBlockId === block.id) return;
 
       e.stopPropagation();
 
@@ -91,7 +90,7 @@ function BlockRenderer({ block, pageId }) {
         });
       }
 
-      const rect = el.scrollHeight; // ✅ CORRECT
+      const rect = el.scrollHeight;
       if (rect > 0) {
         store.updateBlock(block.id, {
           size: {
@@ -144,12 +143,15 @@ function BlockRenderer({ block, pageId }) {
   );
   useLayoutEffect(() => {
     if (block.type !== "text") return;
-    if (store.editingBlockId === block.id) return;
 
     const el = blockRef.current?.querySelector("[contenteditable]");
     if (!el) return;
 
-    const nextHeight = el.scrollHeight;
+    el.style.height = "auto";
+    el.style.minHeight = "5px";
+
+    const nextHeight = Math.ceil(el.scrollHeight);
+
     if (
       typeof nextHeight === "number" &&
       nextHeight > 0 &&
@@ -163,12 +165,13 @@ function BlockRenderer({ block, pageId }) {
       });
     }
   }, [
-    block.style?.fontFamily,
+    block.text,
     block.style?.fontSize,
+    block.style?.fontFamily,
+    block.style?.lineHeight,
     block.style?.bold,
     block.style?.italic,
     block.style?.underline,
-    block.style?.strike,
     block.textAlign,
   ]);
 

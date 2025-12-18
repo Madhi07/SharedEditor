@@ -1,13 +1,9 @@
-import { useLayoutEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useMemo, useCallback } from "react";
 
 export default function useCanvasSelection({
   store,
-  canvasRef,
   isGroupId,
 }) {
-  const [canvasRect, setCanvasRect] = useState(null);
-  const lastRectRef = useRef(null);
-
   /* -------------------------------------------
      Resolve active entity
   ------------------------------------------- */
@@ -27,53 +23,27 @@ export default function useCanvasSelection({
   ------------------------------------------- */
   const selectBlock = useCallback(
     (id) => {
-      if (!id) return;
-      store.select?.(id);
-      store.setSelectionMode?.("block");
+      if (!id || !store) return;
+
+      store.select(id);
+
+      // 🔥 FIX: derive mode safely
+      const block = store.getBlockById?.(id);
+      if (block?.type) {
+        store.setSelectionMode(block.type); // "text" | "image"
+      } else {
+        store.setSelectionMode("block");
+      }
     },
     [store]
   );
-
-  /* -------------------------------------------
-     Measure canvas rect (SAFE, NO LOOP)
-  ------------------------------------------- */
-  useLayoutEffect(() => {
-    const el = canvasRef?.current;
-    if (!el) return;
-
-    const update = () => {
-      const next = el.getBoundingClientRect();
-      const prev = lastRectRef.current;
-
-      // ⛔ Prevent infinite update loop
-      if (
-        prev &&
-        prev.left === next.left &&
-        prev.top === next.top &&
-        prev.width === next.width &&
-        prev.height === next.height
-      ) {
-        return;
-      }
-
-      lastRectRef.current = next;
-      setCanvasRect(next);
-    };
-
-    update();
-    window.addEventListener("resize", update);
-
-    return () => {
-      window.removeEventListener("resize", update);
-    };
-  }, [canvasRef.current]); // ✅ ONLY depend on DOM node
 
   /* -------------------------------------------
      Public API
   ------------------------------------------- */
   return {
     activeBlock,
-    canvasRect,
+    selectedIds,
     selectBlock,
   };
 }
