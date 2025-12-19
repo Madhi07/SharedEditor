@@ -86,6 +86,8 @@ export function createCanvasStore(initial = {}) {
     activeRect: null,
     canvasRect: null,
 
+    isDragging: false,
+
     setEditingBlock(id) {
       this.editingBlockId = id;
     },

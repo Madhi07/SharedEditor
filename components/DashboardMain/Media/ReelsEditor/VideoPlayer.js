@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useLayoutEffect,
+} from "react";
 import videojs from "video.js";
 import "video.js/dist/video-js.css";
 import { Play, Pause } from "lucide-react";
@@ -348,13 +354,13 @@ const VideoPlayer = forwardRef(function VideoPlayer(
   //   canvasSize: { width: 1, height: 1 },
   // });
 
-  const [, setTick] = useState(0);
+  // const [, setTick] = useState(0);
 
-  useEffect(() => {
-    if (!store || typeof store.subscribe !== "function") return;
-    const unsub = store.subscribe(() => setTick((t) => t + 1));
-    return unsub;
-  }, [store]);
+  // useEffect(() => {
+  //   if (!store || typeof store.subscribe !== "function") return;
+  //   const unsub = store.subscribe(() => setTick((t) => t + 1));
+  //   return unsub;
+  // }, [store]);
 
   // useEffect(() => {
   //   if (!overlayRef.current || !store) return;
@@ -470,6 +476,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
 
   const handleOverlayPointerDown = (e) => {
     // ✅ IMPORTANT: only handle true canvas clicks
+    if (e.button !== 0) return;
     if (e.target !== e.currentTarget) return;
 
     e.stopPropagation();
@@ -501,6 +508,26 @@ const VideoPlayer = forwardRef(function VideoPlayer(
       // placeholder if you want VideoPlayer to open edit UI
     }
   };
+  useLayoutEffect(() => {
+    if (!stageContainerRef.current) return;
+
+    const rect = stageContainerRef.current.getBoundingClientRect();
+    const logicalSize = store.getPageLogicalSize?.(pageId);
+
+    if (!logicalSize) return;
+
+    const scaleX = rect.width / logicalSize.width;
+    const scaleY = rect.height / logicalSize.height;
+
+    console.group("🎯 CANVAS SCALE DEBUG");
+    console.log("DOM width  :", rect.width);
+    console.log("DOM height :", rect.height);
+    console.log("Logical width :", logicalSize.width);
+    console.log("Logical height:", logicalSize.height);
+    console.log("Scale X:", scaleX);
+    console.log("Scale Y:", scaleY);
+    console.groupEnd();
+  }, [store, pageId, zoom]);
 
   return (
     <div
@@ -578,9 +605,9 @@ const VideoPlayer = forwardRef(function VideoPlayer(
                 );
               })}
 
-              {activeBlock && (
+              {activeBlock && store.activeRect && !store.isDragging && (
                 <SelectionOverlay
-                  block={activeBlock}
+                  block={{ ...activeBlock, __activeRect: store.activeRect }}
                   beginInteraction={beginInteraction}
                   onSelect={selectBlock}
                   getFit={getFit}

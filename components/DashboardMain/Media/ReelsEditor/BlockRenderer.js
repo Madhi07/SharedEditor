@@ -13,7 +13,7 @@ function BlockRenderer({ block, pageId, onSelect }) {
   const store = useCanvasStore();
   const blockRef = useRef(null);
   const textBeforeEditRef = useRef("");
-
+  const isSelected = store.selectedIds?.[0] === block.id;
   const isEditing = store.editingBlockId === block.id;
 
   /* --------------------------------------------------
@@ -143,6 +143,7 @@ function BlockRenderer({ block, pageId, onSelect }) {
   );
   useLayoutEffect(() => {
     if (block.type !== "text") return;
+    if (store.isDragging) return; // 🔥 THIS IS THE FIX
 
     const el = blockRef.current?.querySelector("[contenteditable]");
     if (!el) return;
@@ -173,6 +174,7 @@ function BlockRenderer({ block, pageId, onSelect }) {
     block.style?.italic,
     block.style?.underline,
     block.textAlign,
+    store.isDragging, // ✅ dependency
   ]);
 
   /* --------------------------------------------------
@@ -195,6 +197,7 @@ function BlockRenderer({ block, pageId, onSelect }) {
       transform: `
         translate(-50%, -50%)
         ${block.rotation ? `rotate(${block.rotation}deg)` : ""}
+        translate3d(var(--drag-x, 0px), var(--drag-y, 0px), 0)
       `,
       transformOrigin: "center",
 
@@ -208,6 +211,29 @@ function BlockRenderer({ block, pageId, onSelect }) {
     block.rotation,
     block.opacity,
   ]);
+
+  useLayoutEffect(() => {
+    if (!isSelected || !blockRef.current) return;
+
+    // Always track DOM position — even during drag
+    const update = () => {
+      const rect = blockRef.current.getBoundingClientRect();
+      store.setActiveRect(rect);
+    };
+
+    update();
+
+    // 🔥 during drag, poll per frame
+    if (store.isDragging) {
+      let raf;
+      const loop = () => {
+        update();
+        raf = requestAnimationFrame(loop);
+      };
+      raf = requestAnimationFrame(loop);
+      return () => cancelAnimationFrame(raf);
+    }
+  }, [isSelected, store.isDragging]);
 
   /* --------------------------------------------------
      Render

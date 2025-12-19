@@ -1487,6 +1487,7 @@ function RealEditor({ ClipsData }) {
   // Hide toolbar ONLY when clicking outside AND nothing is selected
   useEffect(() => {
     const onDocPointerDown = (ev) => {
+      if (ev.button !== 0) return;
       if (!toolbarVisible) return;
 
       const toolbarNode = toolbarRef.current;

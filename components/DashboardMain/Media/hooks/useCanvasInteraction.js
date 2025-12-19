@@ -1,88 +1,89 @@
 import { useRef, useCallback, useEffect } from "react";
 
-export default function useCanvasInteraction({
-  store,
-  pageId,
-  commit = () => {},
-} = {}) {
+export default function useCanvasInteraction({ store, pageId }) {
   const interactionRef = useRef(null);
+  const rafRef = useRef(null);
 
-  /* ================= POINTER MOVE ================= */
-  const onPointerMove = useCallback(
-    (e) => {
-      const i = interactionRef.current;
-      if (!i || i.type !== "move") return;
+  const onPointerMove = useCallback((e) => {
+    const i = interactionRef.current;
+    if (!i || i.type !== "move") return;
 
-      const { blockId, startPointer, startRect, canvasRect } = i;
+    const dx = e.clientX - i.startPointer.x;
+    const dy = e.clientY - i.startPointer.y;
 
-      // Pointer delta (viewport space)
-      const dx = e.clientX - startPointer.x;
-      const dy = e.clientY - startPointer.y;
+    i.lastDx = dx;
+    i.lastDy = dy;
 
-      // Original DOM center
-      const startCenterX = startRect.left + startRect.width / 2;
-      const startCenterY = startRect.top + startRect.height / 2;
+    // ❗ cancel previous frame
+    cancelAnimationFrame(rafRef.current);
 
-      // New DOM center
-      const newCenterX = startCenterX + dx;
-      const newCenterY = startCenterY + dy;
+    rafRef.current = requestAnimationFrame(() => {
+      const el = store.blockRefs?.[pageId]?.[i.blockId];
+      if (!el) return;
 
-      // Convert to canvas-local logical space
-      const newX = newCenterX - canvasRect.left;
-      const newY = newCenterY - canvasRect.top;
+      el.style.setProperty("--drag-x", `${dx}px`);
+      el.style.setProperty("--drag-y", `${dy}px`);
+    });
+  }, [store, pageId]);
 
-      store.updateBlock(blockId, {
-        position: {
-          x: newX,
-          y: newY,
-        },
-      });
-    },
-    [store]
-  );
-
-  /* ================= END ================= */
-  const endInteraction = useCallback(() => {
+  const endInteraction = useCallback((e) => {
     const i = interactionRef.current;
     if (!i) return;
 
+    // 🔥 STOP RAF COMPLETELY
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+
+    // 🔥 compute FINAL delta from pointerup
+    const dx = e.clientX - i.startPointer.x;
+    const dy = e.clientY - i.startPointer.y;
+
+    const el = store.blockRefs?.[pageId]?.[i.blockId];
+    if (el) {
+      el.style.removeProperty("--drag-x");
+      el.style.removeProperty("--drag-y");
+    }
+
+    // 🔥 commit ONCE, after RAF is dead
+    store.updateBlock(i.blockId, {
+      position: {
+        x: i.startCenter.x + dx,
+        y: i.startCenter.y + dy,
+      },
+    });
+
+    store.isDragging = false;
+
     document.removeEventListener("pointermove", onPointerMove);
     document.removeEventListener("pointerup", endInteraction);
-
     interactionRef.current = null;
-    commit?.({ name: "Move", pageId });
-  }, [commit, pageId, onPointerMove]);
+  }, [store, pageId, onPointerMove]);
 
-  /* ================= START ================= */
-  const beginInteraction = useCallback(
-    (e, { type, blockId }) => {
-      e.stopPropagation();
-      e.preventDefault();
+  const beginInteraction = useCallback((e, { type, blockId }) => {
+    e.preventDefault();
+    e.stopPropagation();
 
-      const blockEl = store.blockRefs?.[pageId]?.[blockId];
-      const canvasRect = store.canvasRect;
+    const block = store.getBlockById(blockId);
+    if (!block) return;
 
-      if (!blockEl || !canvasRect) return;
+    store.isDragging = true;
 
-      const rect = blockEl.getBoundingClientRect();
+    interactionRef.current = {
+      type,
+      blockId,
+      startPointer: { x: e.clientX, y: e.clientY },
+      startCenter: { ...block.position },
+      lastDx: 0,
+      lastDy: 0,
+    };
 
-      interactionRef.current = {
-        type,
-        blockId,
-        startPointer: { x: e.clientX, y: e.clientY },
-        startRect: rect,
-        canvasRect,
-      };
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", endInteraction);
+  }, [store, onPointerMove, endInteraction]);
 
-      document.addEventListener("pointermove", onPointerMove);
-      document.addEventListener("pointerup", endInteraction);
-    },
-    [store, pageId, onPointerMove, endInteraction]
-  );
-
-  /* ================= CLEANUP ================= */
   useEffect(() => {
     return () => {
+      cancelAnimationFrame(rafRef.current);
       document.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("pointerup", endInteraction);
     };

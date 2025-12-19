@@ -1,4 +1,3 @@
-// SharedComponent/SelectionOverlay.js
 import React from "react";
 
 export default function SelectionOverlay({
@@ -8,40 +7,38 @@ export default function SelectionOverlay({
   canResize = true,
   cornerHandles = [],
   sideHandles = [],
-  getFit,
 }) {
-  if (!block) return null;
+  // We REQUIRE a DOM rect (Infographics-style)
+  const rect = block?.__activeRect;
+  if (!rect) return null;
 
-  const fit = getFit?.();
-  if (!fit) return null;
-
-  const { sx, sy } = fit;
-
-  const width = block.size.width * sx;
-  const height = block.size.height * sy;
+  // DOM-derived size
+  const width = rect.width;
+  const height = rect.height;
 
   if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
 
-  // block.position is already CENTER-based logical space
-  const centerX = block.position.x * sx;
-  const centerY = block.position.y * sy;
+  // DOM-derived center (viewport space)
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
 
   const wrapperStyle = {
-    position: "absolute",
+    position: "fixed", 
     left: centerX,
     top: centerY,
     width,
     height,
     transform: `
-    translate(-50%, -50%)
-    ${block.rotation ? `rotate(${block.rotation}deg)` : ""}
-    ${block.flipH ? " scaleX(-1)" : ""}
-    ${block.flipV ? " scaleY(-1)" : ""}
-  `,
+      translate(-50%, -50%)
+      ${block.rotation ? `rotate(${block.rotation}deg)` : ""}
+      ${block.flipH ? " scaleX(-1)" : ""}
+      ${block.flipV ? " scaleY(-1)" : ""}
+    `,
     transformOrigin: "center",
     zIndex: 9999,
     outline: "1px solid rgba(168, 85, 247, 0.9)",
     pointerEvents: "auto",
+    touchAction: "none",
   };
 
   const borderStyle = {
@@ -76,12 +73,6 @@ export default function SelectionOverlay({
       handle,
     });
   };
-
-  console.log("SELECTION OVERLAY POS", {
-    centerX,
-    centerY,
-    fit,
-  });
 
   /* -------------------------------------------------
      Render
