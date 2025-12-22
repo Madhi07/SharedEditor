@@ -13,6 +13,7 @@ function BlockRenderer({ block, pageId, onSelect }) {
   const store = useCanvasStore();
   const blockRef = useRef(null);
   const textBeforeEditRef = useRef("");
+  const textRef = useRef(null);
   const isSelected = store.selectedIds?.[0] === block.id;
   const isEditing = store.editingBlockId === block.id;
 
@@ -30,7 +31,6 @@ function BlockRenderer({ block, pageId, onSelect }) {
   -------------------------------------------------- */
   const onPointerDown = useCallback(
     (e) => {
-      if (block.type === "text" && e.detail > 1) return;
       if (isEditing) return;
 
       e.stopPropagation();
@@ -38,6 +38,9 @@ function BlockRenderer({ block, pageId, onSelect }) {
     },
     [block.id, block.type, isEditing, onSelect]
   );
+
+  const isScalingText =
+    store.isDragging && block.type === "text" && store.dragState?.w != null;
 
   /* --------------------------------------------------
      Double click → enter text edit
@@ -47,19 +50,33 @@ function BlockRenderer({ block, pageId, onSelect }) {
       if (block.type !== "text") return;
       if (store.editingBlockId === block.id) return;
 
+      e.preventDefault();
       e.stopPropagation();
 
       textBeforeEditRef.current = store.getBlockById(block.id)?.text ?? "";
 
       store.setEditingBlock(block.id);
       store.setSelectionMode("text");
-
-      requestAnimationFrame(() => {
-        blockRef.current?.querySelector("[contenteditable]")?.focus();
-      });
     },
     [block.id, block.type, store]
   );
+
+  useEffect(() => {
+    if (!isEditing) return;
+    if (!textRef.current) return;
+
+    // Focus AFTER React commits contentEditable=true
+    requestAnimationFrame(() => {
+      textRef.current.focus();
+
+      // Optional: select all text
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(textRef.current);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+  }, [isEditing]);
 
   /* --------------------------------------------------
      Text input (live update only)
@@ -114,7 +131,7 @@ function BlockRenderer({ block, pageId, onSelect }) {
   const textStyle = useMemo(
     () => ({
       fontFamily: style.fontFamily || "Roboto",
-      fontSize: style.fontSize ? `${style.fontSize}px` : "18px",
+      fontSize: `calc(${style.fontSize || 18}px * var(--font-scale, 1))`,
       color: style.color || "#000",
       fontWeight: style.bold ? "700" : "400",
       fontStyle: style.italic ? "italic" : "normal",
@@ -128,6 +145,11 @@ function BlockRenderer({ block, pageId, onSelect }) {
       lineHeight: style.lineHeight || "1.3",
       width: "100%",
       height: "100%",
+      whiteSpace: "pre-wrap",
+      wordBreak: "break-word",
+      overflowWrap: "break-word",
+      overflow: "hidden",
+      minWidth: 0,
     }),
     [
       style.fontFamily,
@@ -143,7 +165,9 @@ function BlockRenderer({ block, pageId, onSelect }) {
   );
   useLayoutEffect(() => {
     if (block.type !== "text") return;
-    if (store.isDragging) return; // 🔥 THIS IS THE FIX
+
+    // DO NOT measure while dragging or scaling
+    if (store.isDragging || isScalingText) return;
 
     const el = blockRef.current?.querySelector("[contenteditable]");
     if (!el) return;
@@ -174,7 +198,8 @@ function BlockRenderer({ block, pageId, onSelect }) {
     block.style?.italic,
     block.style?.underline,
     block.textAlign,
-    store.isDragging, // ✅ dependency
+    store.isDragging,
+    isScalingText,
   ]);
 
   /* --------------------------------------------------
@@ -190,16 +215,18 @@ function BlockRenderer({ block, pageId, onSelect }) {
       position: "absolute",
       left: x,
       top: y,
-      width: w,
-      height: h,
+      // width: w,
+      // height: h,
       opacity: block.opacity ?? 1,
 
       transform: `
         translate(-50%, -50%)
-        ${block.rotation ? `rotate(${block.rotation}deg)` : ""}
         translate3d(var(--drag-x, 0px), var(--drag-y, 0px), 0)
+        rotate(var(--rotate, ${block.rotation ?? 0}deg))
       `,
       transformOrigin: "center",
+      width: "var(--resize-w, " + w + "px)",
+      height: "var(--resize-h, " + h + "px)",
 
       ...buildBlockStyle(block),
     };
@@ -244,12 +271,13 @@ function BlockRenderer({ block, pageId, onSelect }) {
       data-block-id={block.id}
       style={wrapperStyle}
       onPointerDown={onPointerDown}
-      onDoubleClick={onDoubleClick}
     >
       {block.type === "text" && (
         <div
+          ref={textRef}
           contentEditable={isEditing}
           suppressContentEditableWarning
+          onDoubleClick={onDoubleClick}
           onInput={handleTextInput}
           onBlur={handleTextBlur}
           style={textStyle}

@@ -519,7 +519,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     const scaleX = rect.width / logicalSize.width;
     const scaleY = rect.height / logicalSize.height;
 
-    console.group("🎯 CANVAS SCALE DEBUG");
+    console.group("CANVAS SCALE DEBUG");
     console.log("DOM width  :", rect.width);
     console.log("DOM height :", rect.height);
     console.log("Logical width :", logicalSize.width);

@@ -108,6 +108,15 @@ export function createCanvasStore(initial = {}) {
       this.canvasRect = rect;
     },
 
+    // runtime only
+    dragState: {
+      x: 0,
+      y: 0,
+      w: null,
+      h: null,
+      active: false,
+    },
+
     //
     // Editor convenience accessors
     //
@@ -251,7 +260,7 @@ export function createCanvasStore(initial = {}) {
           type: "text",
           text,
           position: { x, y },
-          size: { width: 220,height:26 },
+          size: { width: 220, height: 26 },
           startTime,
           duration,
           style,
