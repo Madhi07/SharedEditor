@@ -4,6 +4,7 @@ import {
   useState,
   useCallback,
   useLayoutEffect,
+  useMemo,
 } from "react";
 import videojs from "video.js";
 import "video.js/dist/video-js.css";
@@ -12,6 +13,7 @@ import BlockRenderer from "./BlockRenderer";
 import { useCanvasStore } from "../context/CanvasStoreContext";
 import SelectionOverlay from "../SharedComponent/SelectionOverlay";
 import { forwardRef } from "react";
+import HelperToolbar from "../SharedComponent/HelperToolbar";
 import { useImperativeHandle } from "react";
 import {
   cornerHandles,
@@ -54,6 +56,16 @@ const VideoPlayer = forwardRef(function VideoPlayer(
   const { selectBlock, activeBlock, selectedIds } = useCanvasSelection({
     store,
   });
+
+  const textClipMap = useMemo(() => {
+    const map = new Map();
+    (clips || []).forEach((c) => {
+      if (c.type === "text" && c.blockId) {
+        map.set(c.blockId, c);
+      }
+    });
+    return map;
+  }, [clips]);
 
   // const safeZoom = Math.min(Math.max(zoom, 0.5), 3);
 
@@ -586,13 +598,18 @@ const VideoPlayer = forwardRef(function VideoPlayer(
               onPointerDown={handleOverlayPointerDown}
             >
               {(blocks || []).map((b) => {
-                const start = b.startTime ?? 0;
-                const dur = b.duration ?? Infinity;
-                const visible =
-                  typeof currentTime === "number"
-                    ? currentTime >= start && currentTime < start + dur
-                    : true;
-                if (!visible) return null;
+                if (b.type === "text") {
+                  const clip = textClipMap.get(b.id);
+                  if (!clip) return null;
+
+                  const visible =
+                    typeof currentTime === "number"
+                      ? currentTime >= clip.startTime &&
+                        currentTime < clip.startTime + clip.duration
+                      : true;
+
+                  if (!visible) return null;
+                }
 
                 return (
                   <BlockRenderer
@@ -606,18 +623,28 @@ const VideoPlayer = forwardRef(function VideoPlayer(
               })}
 
               {activeBlock && store.activeRect && !store.isDragging && (
-                <SelectionOverlay
-                  block={{ ...activeBlock, __activeRect: store.activeRect }}
-                  beginInteraction={beginInteraction}
-                  onSelect={selectBlock}
-                  getFit={getFit}
-                  cornerHandles={cornerHandles}
-                  sideHandles={
-                    activeBlock.type === "text"
-                      ? textSideHandles
-                      : imageSideHandles
-                  }
-                />
+                <>
+                  <SelectionOverlay
+                    block={{ ...activeBlock, __activeRect: store.activeRect }}
+                    beginInteraction={beginInteraction}
+                    onSelect={selectBlock}
+                    getFit={getFit}
+                    cornerHandles={cornerHandles}
+                    sideHandles={
+                      activeBlock.type === "text"
+                        ? textSideHandles
+                        : imageSideHandles
+                    }
+                    onDoubleClick={(e) => {
+                      if (activeBlock?.type === "text") {
+                        e.stopPropagation();
+                        store.setEditingBlock(activeBlock.id);
+                        store.setSelectionMode("text");
+                      }
+                    }}
+                  />
+                  <HelperToolbar />
+                </>
               )}
             </div>
           </div>

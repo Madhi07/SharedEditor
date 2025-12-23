@@ -1,6 +1,11 @@
 // src/utils/editorActions.js
 // Shared editor actions for canvas editors (infographics, video editor, etc.)
-
+import {
+  DuplicateCommand,
+  DeleteBlockCommand,
+  GroupCommand,
+  UngroupCommand,
+} from "../../SharedStore/Commands";
 /* --------------------------------------------------
    Utils
 -------------------------------------------------- */
@@ -21,18 +26,21 @@ function deepClone(v) {
   }
 }
 
-function makeCompoundCommand(oldMap, newMap, name = "Compound") {
+function makeCompoundCommand(oldMap, newMap, name = "Compound", meta = {}) {
   return {
-    name,
-    do(s) {
+    do(store) {
       Object.entries(newMap).forEach(([id, patch]) =>
-        s.updateBlock(id, deepClone(patch))
+        store.updateBlock(id, deepClone(patch))
       );
     },
-    undo(s) {
+    undo(store) {
       Object.entries(oldMap).forEach(([id, patch]) =>
-        s.updateBlock(id, deepClone(patch))
+        store.updateBlock(id, deepClone(patch))
       );
+    },
+    meta: {
+      name,
+      ...meta,
     },
   };
 }
@@ -43,14 +51,19 @@ function makeCompoundCommand(oldMap, newMap, name = "Compound") {
 
 export function expandSelectionToTargetIds(store, selection = {}) {
   const { selectedIds, activeId } = selection || {};
-  let sel =
-    selectedIds && selectedIds.length
-      ? selectedIds.slice()
-      : activeId
-      ? [activeId]
-      : [];
+  let sel = selectedIds?.length
+    ? selectedIds.slice()
+    : activeId
+    ? [activeId]
+    : store.primarySelectionId
+    ? [store.primarySelectionId()]
+    : [];
 
-  if (sel.length === 1 && typeof sel[0] === "string" && sel[0].startsWith("g-")) {
+  if (
+    sel.length === 1 &&
+    typeof sel[0] === "string" &&
+    sel[0].startsWith("g-")
+  ) {
     const g = store.getGroupById?.(sel[0]);
     if (g) {
       return Array.isArray(g.childIds) && g.childIds.length
@@ -108,14 +121,13 @@ export function applyToSelection(store, selection = {}, patchFn, opts = {}) {
   if (!Object.keys(newMap).length) return null;
 
   // live update
-  Object.entries(newMap).forEach(([id, patch]) =>
-    store.updateBlock(id, patch)
-  );
+  Object.entries(newMap).forEach(([id, patch]) => store.updateBlock(id, patch));
 
   const cmd = makeCompoundCommand(
     oldMap,
     newMap,
-    opts.name || "ApplyTextStyle"
+    opts.name || "ApplyTextStyle",
+    { pageId: store.activePageId }
   );
   store.applyCommand(cmd);
   return cmd;
@@ -127,32 +139,23 @@ export function applyToSelection(store, selection = {}, patchFn, opts = {}) {
 
 export function changeFontFamily(store, selection, fontFamily) {
   if (!fontFamily) return null;
-  return applyToSelection(
-    store,
-    selection,
-    () => ({ fontFamily }),
-    { name: "ChangeFontFamily" }
-  );
+  return applyToSelection(store, selection, () => ({ fontFamily }), {
+    name: "ChangeFontFamily",
+  });
 }
 
 export function changeFontSize(store, selection, fontSize) {
   if (fontSize == null) return null;
-  return applyToSelection(
-    store,
-    selection,
-    () => ({ fontSize }),
-    { name: "ChangeFontSize" }
-  );
+  return applyToSelection(store, selection, () => ({ fontSize }), {
+    name: "ChangeFontSize",
+  });
 }
 
 export function changeTextColor(store, selection, color) {
   if (!color) return null;
-  return applyToSelection(
-    store,
-    selection,
-    () => ({ color }),
-    { name: "ChangeTextColor" }
-  );
+  return applyToSelection(store, selection, () => ({ color }), {
+    name: "ChangeTextColor",
+  });
 }
 
 export function toggleTextStyle(store, selection, key) {
@@ -184,7 +187,9 @@ export function setTextAlign(store, selection, align = "center") {
   });
 
   Object.entries(newMap).forEach(([id, p]) => store.updateBlock(id, p));
-  const cmd = makeCompoundCommand(oldMap, newMap, "SetTextAlign");
+  const cmd = makeCompoundCommand(oldMap, newMap, "SetTextAlign", {
+    pageId: store.activePageId,
+  });
   store.applyCommand(cmd);
   return cmd;
 }
@@ -204,7 +209,9 @@ export function setListType(store, selection, listType = "normal") {
   });
 
   Object.entries(newMap).forEach(([id, p]) => store.updateBlock(id, p));
-  const cmd = makeCompoundCommand(oldMap, newMap, "SetListType");
+  const cmd = makeCompoundCommand(oldMap, newMap, "SetListType", {
+    pageId: store.activePageId,
+  });
   store.applyCommand(cmd);
   return cmd;
 }
@@ -228,7 +235,9 @@ export function setOpacity(store, selection, value = 1) {
   });
 
   Object.entries(newMap).forEach(([id, p]) => store.updateBlock(id, p));
-  const cmd = makeCompoundCommand(oldMap, newMap, "SetOpacity");
+  const cmd = makeCompoundCommand(oldMap, newMap, "SetOpacity", {
+    pageId: store.activePageId,
+  });
   store.applyCommand(cmd);
   return cmd;
 }
@@ -254,9 +263,98 @@ export function flipBlock(store, selection, direction = "horizontal") {
   });
 
   Object.entries(newMap).forEach(([id, p]) => store.updateBlock(id, p));
-  const cmd = makeCompoundCommand(oldMap, newMap, `Flip:${direction}`);
+  const cmd = makeCompoundCommand(oldMap, newMap, `Flip:${direction}`, {
+    pageId: store.activePageId,
+  });
   store.applyCommand(cmd);
   return cmd;
+}
+
+/* --------------------------------------------------
+   HelperToolbar actions
+-------------------------------------------------- */
+
+export function toggleLockSelection(store) {
+  const blocks = store.selectedBlocks?.() || [];
+  if (!blocks.length) return;
+
+  const shouldLock = !blocks.every((b) => b.locked);
+
+  const oldMap = {};
+  const newMap = {};
+
+  blocks.forEach((b) => {
+    oldMap[b.id] = { locked: !!b.locked };
+    newMap[b.id] = { locked: shouldLock };
+  });
+
+  store.applyCommand(
+    makeCompoundCommand(oldMap, newMap, "ToggleLock", {
+      pageId: store.activePageId,
+    })
+  );
+}
+
+export function duplicateSelection(store) {
+  const blocks = store.selectedBlocks?.() || [];
+  if (!blocks.length) return;
+
+  const createdIds = [];
+
+  blocks.forEach((b) => {
+    const cmd = DuplicateCommand({
+      pageId: store.activePageId,
+      originalBlock: b,
+    });
+
+    // capture created id AFTER execution
+    const originalDo = cmd.do;
+    cmd.do = (s) => {
+      originalDo(s);
+      if (cmd.meta?.afterSnapshot?.createdId) {
+        createdIds.push(cmd.meta.afterSnapshot.createdId);
+      }
+    };
+
+    store.applyCommand(cmd);
+  });
+
+  // ✅ select all duplicated blocks at once
+  if (createdIds.length) {
+    store.select(createdIds);
+  }
+}
+
+export function deleteSelection(store) {
+  const blocks = store.selectedBlocks?.() || [];
+  if (!blocks.length) return;
+
+  blocks.forEach((b) => {
+    store.applyCommand(DeleteBlockCommand(b.id));
+  });
+}
+
+export function groupSelection(store) {
+  const blocks = store.selectedBlocks?.() || [];
+  if (blocks.length < 2) return;
+
+  const groupId = `g-${Date.now()}`;
+  store.applyCommand(
+    GroupCommand(
+      groupId,
+      blocks.map((b) => b.id)
+    )
+  );
+}
+
+export function ungroupSelection(store) {
+  const blocks = store.selectedBlocks?.() || [];
+
+  blocks.forEach((b) => {
+    if (b.groupId) {
+      store.applyCommand(UngroupCommand(b.groupId, [b.id]));
+    }
+  });
 }
 
 /* --------------------------------------------------
@@ -275,4 +373,9 @@ export default {
   setListType,
   setOpacity,
   flipBlock,
+  toggleLockSelection,
+  duplicateSelection,
+  deleteSelection,
+  groupSelection,
+  ungroupSelection,
 };

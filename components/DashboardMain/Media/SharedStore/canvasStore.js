@@ -85,7 +85,7 @@ export function createCanvasStore(initial = {}) {
     selectionMode: null, // "canvas" | "text" | "image"
     activeRect: null,
     canvasRect: null,
-
+    locked: false,
     isDragging: false,
 
     setEditingBlock(id) {
@@ -246,14 +246,7 @@ export function createCanvasStore(initial = {}) {
 
     addTextBlock(
       pageId,
-      {
-        x = 20,
-        y = 20,
-        text = "New text",
-        startTime = 0,
-        duration = 5,
-        style = {},
-      } = {}
+      { x = 20, y = 20, text = "Neww text", style = {} } = {}
     ) {
       return store.addBlockToPage(
         {
@@ -261,9 +254,10 @@ export function createCanvasStore(initial = {}) {
           text,
           position: { x, y },
           size: { width: 220, height: 26 },
-          startTime,
-          duration,
           style,
+          opacity: 1,
+          rotation: 0,
+          zIndex: 0,
         },
         pageId
       );

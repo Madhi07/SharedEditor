@@ -15,6 +15,7 @@ const AUTO_SCROLL_TARGET_OFFSET_RATIO = 0.5; // target: make playhead appear ~50
 
 export default function Timeline({
   clips = [],
+  textBlockMap,
   currentTime = 0,
   totalDuration = 0,
   onClipUpdate = () => {},
@@ -57,6 +58,36 @@ export default function Timeline({
     damping: 28,
     mass: 1,
   });
+
+  // ---------- TRACK LAYOUT ----------
+  const TRACK_HEIGHTS = {
+    [-1]: 40, // Text
+    [0]: 70, // Video / Image
+    audio: 45, // Audio
+  };
+
+  const ROW_GAP = 12;
+  const VISUAL_TRACK_TOP = 20;
+
+  function trackToTop(track) {
+    if (track === -1) {
+      return VISUAL_TRACK_TOP;
+    }
+
+    if (track === 0) {
+      return VISUAL_TRACK_TOP + TRACK_HEIGHTS[-1] + ROW_GAP;
+    }
+
+    // audio tracks (1, 2, 3…)
+    return (
+      VISUAL_TRACK_TOP +
+      TRACK_HEIGHTS[-1] +
+      ROW_GAP +
+      TRACK_HEIGHTS[0] +
+      ROW_GAP +
+      (track - 1) * (TRACK_HEIGHTS.audio + ROW_GAP)
+    );
+  }
 
   useEffect(() => {
     function setContainerScroll(v) {
@@ -119,38 +150,40 @@ export default function Timeline({
   // Handle click to seek
   const handleTimelineClick = (e) => {
     if (!timelineRef.current || isDragging) return;
+
     const rect = timelineRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+
     const clickedTime = Math.max(
       0,
       Math.min(x / pixelsPerSecond, totalDuration)
     );
-    const videoTrackHeight = 80;
-    const audioTrackStartY = videoTrackHeight;
-    if (y > audioTrackStartY) {
-      const clickedAudioClip = clips.find(
-        (c) =>
-          c.type === "audio" &&
-          clickedTime >= c.startTime &&
-          clickedTime < c.endTime
-      );
-      if (clickedAudioClip) {
-        onClipSelect(clickedAudioClip);
-        onSeek(clickedTime, clickedAudioClip.id);
-        return;
-      }
+
+    // Find top-most clip at this time (text > video > audio)
+    const clickedClip = [...clips]
+      .sort((a, b) => {
+        const ta =
+          a.type === "text"
+            ? -1
+            : a.type === "video" || a.type === "image"
+            ? 0
+            : 1;
+        const tb =
+          b.type === "text"
+            ? -1
+            : b.type === "video" || b.type === "image"
+            ? 0
+            : 1;
+        return ta - tb;
+      })
+      .find((c) => clickedTime >= c.startTime && clickedTime < c.endTime);
+
+    if (clickedClip) {
+      onClipSelect(clickedClip);
+      onSeek(clickedTime, clickedClip.id);
+    } else {
+      onSeek(clickedTime);
     }
-    const clickedVisualClip = clips.find(
-      (c) =>
-        (c.type === "video" || c.type === "image") &&
-        clickedTime >= c.startTime &&
-        clickedTime < c.endTime
-    );
-    if (clickedVisualClip) {
-      onClipSelect(clickedVisualClip);
-    }
-    onSeek(clickedTime, clickedVisualClip?.id || null);
   };
 
   // refs for clip nodes
@@ -397,7 +430,21 @@ export default function Timeline({
           });
         }
       } else if (dragType === "trim-left") {
-        if (clip.type === "image") {
+        if (clip.type === "text") {
+          let newStart = Math.max(0, startSnapshotTime + deltaTime);
+          const newDuration = Math.max(
+            MIN_CLIP_DURATION,
+            clip.duration - (newStart - startSnapshotTime)
+          );
+
+          onClipUpdate(clip.id, {
+            startTime: newStart,
+            duration: newDuration,
+            endTime: newStart + newDuration,
+          });
+
+          onSeek(newStart);
+        } else if (clip.type === "image") {
           let newStart = Math.max(0, startSnapshotTime + deltaTime);
           const newDuration = Math.max(
             MIN_CLIP_DURATION,
@@ -434,7 +481,17 @@ export default function Timeline({
           onSeek(newStartTime);
         }
       } else if (dragType === "trim-right") {
-        if (clip.type === "image") {
+        if (clip.type === "text") {
+          const newDuration = Math.max(
+            MIN_CLIP_DURATION,
+            clip.duration + deltaTime
+          );
+
+          onClipUpdate(clip.id, {
+            duration: newDuration,
+            endTime: clip.startTime + newDuration,
+          });
+        } else if (clip.type === "image") {
           const nextClip = clips
             .filter((c) => c.startTime > clip.startTime)
             .sort((a, b) => a.startTime - b.startTime)[0];
@@ -581,7 +638,10 @@ export default function Timeline({
   const handleDragEnd = (clipId, newStartTime) => {
     const clip = clips.find((c) => c.id === clipId);
     if (!clip) return;
-    const clipTimelineDuration = clip.duration - clip.trimStart - clip.trimEnd;
+    const clipTimelineDuration =
+      clip.type === "text"
+        ? clip.duration
+        : clip.duration - clip.trimStart - clip.trimEnd;
     const updated = clips.map((c) =>
       c.id === clipId
         ? {
@@ -591,34 +651,37 @@ export default function Timeline({
           }
         : c
     );
-    const audioClips = updated.filter((c) => c.type === "audio");
-    const layered = adjustAudioTracks(audioClips);
-    const merged = updated.map((c) => {
-      const layer = layered.find((a) => a.id === c.id);
-      return layer ? { ...c, track: layer.track } : c;
-    });
-    if (onAutoLayerFix) onAutoLayerFix(merged);
+    if (onAutoLayerFix) {
+      onAutoLayerFix(updated);
+    }
+    // const audioClips = updated.filter((c) => c.type === "audio");
+    // const layered = adjustAudioTracks(audioClips);
+    // const merged = updated.map((c) => {
+    //   const layer = layered.find((a) => a.id === c.id);
+    //   return layer ? { ...c, track: layer.track } : c;
+    // });
+    // if (onAutoLayerFix) onAutoLayerFix(merged);
   };
 
-  function adjustAudioTracks(audioClips) {
-    const sorted = [...audioClips].sort((a, b) => a.startTime - b.startTime);
-    const layers = [];
-    sorted.forEach((clip) => {
-      let assigned = false;
-      for (const layer of layers) {
-        const lastClip = layer[layer.length - 1];
-        if (clip.startTime >= lastClip.endTime) {
-          layer.push(clip);
-          assigned = true;
-          break;
-        }
-      }
-      if (!assigned) layers.push([clip]);
-    });
-    return layers.flatMap((layer, i) =>
-      layer.map((clip) => ({ ...clip, track: i }))
-    );
-  }
+  // function adjustAudioTracks(audioClips) {
+  //   const sorted = [...audioClips].sort((a, b) => a.startTime - b.startTime);
+  //   const layers = [];
+  //   sorted.forEach((clip) => {
+  //     let assigned = false;
+  //     for (const layer of layers) {
+  //       const lastClip = layer[layer.length - 1];
+  //       if (clip.startTime >= lastClip.endTime) {
+  //         layer.push(clip);
+  //         assigned = true;
+  //         break;
+  //       }
+  //     }
+  //     if (!assigned) layers.push([clip]);
+  //   });
+  //   return layers.flatMap((layer, i) =>
+  //     layer.map((clip) => ({ ...clip, track: i }))
+  //   );
+  // }
 
   const generateTimeMarkers = () => {
     const markers = [];
@@ -758,10 +821,19 @@ export default function Timeline({
             <div className="absolute top-1/2 -left-[4px] w-[11px] h-[11px] bg-red-500 rounded-full border-2 border-white transform -translate-y-1/2"></div>
           </motion.div>
 
+          <div
+            className="absolute inset-x-0 border-b border-gray-300/50"
+            style={{ top: trackToTop(-1, 40) }}
+          >
+            <span className="absolute -left-12 top-1/2 -translate-y-1/2 text-xs text-gray-500">
+              Text
+            </span>
+          </div>
+
           {/* Tracks visual guides */}
           <div
             className="absolute inset-x-0 border-b border-gray-300/50"
-            style={{ top: "20px", height: `${videoClipHeight + 10}px` }}
+            style={{ top: trackToTop(0, videoClipHeight) }}
           >
             <span className="absolute -left-12 top-1/2 -translate-y-1/2 text-xs text-gray-500">
               Video
@@ -770,8 +842,7 @@ export default function Timeline({
           <div
             className="absolute inset-x-0 border-b border-gray-300/50"
             style={{
-              top: `${videoClipHeight + 50}px`,
-              height: `${audioClipHeight + 10}px`,
+              top: trackToTop(1, audioClipHeight),
             }}
           >
             <span className="absolute -left-12 top-1/2 -translate-y-1/2 text-xs text-gray-500">
@@ -813,21 +884,22 @@ export default function Timeline({
           {/* Clips rendering */}
           {clips.map((clip) => {
             const clipTimelineDuration =
-              clip.duration - clip.trimStart - clip.trimEnd;
+              clip.type === "text"
+                ? clip.duration
+                : clip.duration - clip.trimStart - clip.trimEnd;
             if (clipTimelineDuration < MIN_CLIP_DURATION) {
               console.warn("Clip duration is too small:", clip.id);
             }
             const clipWidth = clipTimelineDuration * pixelsPerSecond;
             const clipHeight =
-              clip.type === "audio" ? audioClipHeight : videoClipHeight;
+              clip.type === "audio"
+                ? TRACK_HEIGHTS.audio
+                : clip.type === "text"
+                ? TRACK_HEIGHTS[-1]
+                : TRACK_HEIGHTS[0];
+
             const clipLeft = clip.startTime * pixelsPerSecond;
             const isSelected = clip.id === selectedClipId;
-            let trackPosition =
-              clip.type === "audio"
-                ? videoClipHeight +
-                  30 +
-                  (clip.track || 0) * (audioClipHeight + 20)
-                : 20;
             const baseBgColor =
               clip.type === "video"
                 ? "bg-blue-500"
@@ -840,6 +912,24 @@ export default function Timeline({
               typeof thumb === "string" &&
               (thumb.startsWith("data:image/") ||
                 /\.(png|jpe?g|gif|webp|avif|svg)(\?.*)?$/i.test(thumb));
+            const track =
+              clip.type === "text"
+                ? clip.track ?? -1
+                : clip.type === "audio"
+                ? clip.track ?? 1
+                : 0;
+
+            // vertical position from track
+            const trackTop = trackToTop(track);
+
+            if (clip.type === "text") {
+              console.log("TEXT CLIP CHECK", {
+                clipId: clip.id,
+                blockId: clip.blockId,
+                hasBlock: textBlockMap.has(clip.blockId),
+                block: textBlockMap.get(clip.blockId),
+              });
+            }
 
             return (
               <div
@@ -853,7 +943,7 @@ export default function Timeline({
                   left: `${clipLeft}px`,
                   width: `${clipWidth}px`,
                   height: `${clipHeight}px`,
-                  top: `${trackPosition}px`,
+                  top: `${trackTop}px`,
                 }}
                 ref={(el) => {
                   if (el) clipRefs.current.set(clip.id, el);
@@ -865,6 +955,41 @@ export default function Timeline({
                   showToolbarForClip(clip, e);
                 }}
               >
+                {clip.type === "text" &&
+                  (() => {
+                    const block = textBlockMap?.get(clip.blockId);
+                    const text = block?.text || "Text";
+
+                    return (
+                      <div className="absolute inset-0 flex items-center justify-center px-3 text-white text-sm font-medium text-center pointer-events-none">
+                        <span
+                          className="line-clamp-2"
+                          style={{
+                            fontFamily: block?.style?.fontFamily || "inherit",
+                            fontSize: Math.min(
+                              16,
+                              block?.style?.fontSize || 16
+                            ),
+                            fontWeight: block?.style?.bold ? 700 : 500,
+                            fontStyle: block?.style?.italic
+                              ? "italic"
+                              : "normal",
+                            textDecoration: block?.style?.underline
+                              ? "underline"
+                              : block?.style?.strike
+                              ? "line-through"
+                              : "none",
+                            color: block?.style?.color || "#ffffff",
+                            textAlign: block?.textAlign || "center",
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word",
+                          }}
+                        >
+                          {text}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 {/* visuals */}
                 {(() => {
                   if (clip.type === "image") {

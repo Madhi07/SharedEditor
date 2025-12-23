@@ -1,4 +1,5 @@
 import { useRef, useCallback, useEffect } from "react";
+import { runInAction } from "mobx";
 
 export default function useCanvasInteraction({ store, pageId }) {
   const interactionRef = useRef(null);
@@ -21,16 +22,18 @@ export default function useCanvasInteraction({ store, pageId }) {
         const el = store.blockRefs?.[pageId]?.[i.blockId];
         if (!el) return;
 
-        /* ================= MOVE (SCREEN SPACE) ================= */
+        /* ================= MOVE ================= */
         if (i.type === "move") {
           el.style.setProperty("--drag-x", `${dx}px`);
           el.style.setProperty("--drag-y", `${dy}px`);
 
-          store.dragState.active = true;
-          store.dragState.x = dx;
-          store.dragState.y = dy;
-          store.dragState.w = null;
-          store.dragState.h = null;
+          runInAction(() => {
+            store.dragState.active = true;
+            store.dragState.x = dx;
+            store.dragState.y = dy;
+            store.dragState.w = null;
+            store.dragState.h = null;
+          });
           return;
         }
 
@@ -38,7 +41,7 @@ export default function useCanvasInteraction({ store, pageId }) {
         if (i.type === "resize") {
           const isText = i.blockType === "text";
 
-          // TEXT — width only (right handle)
+          // TEXT — width only
           if (isText && i.textResizeMode === "width") {
             const w = Math.max(50, i.startSize.width + dx);
 
@@ -46,18 +49,19 @@ export default function useCanvasInteraction({ store, pageId }) {
             el.style.setProperty("--drag-x", `0px`);
             el.style.setProperty("--drag-y", `0px`);
 
-            store.dragState.active = true;
-            store.dragState.x = 0;
-            store.dragState.y = 0;
-            store.dragState.w = w;
-            store.dragState.h = null;
+            runInAction(() => {
+              store.dragState.active = true;
+              store.dragState.x = 0;
+              store.dragState.y = 0;
+              store.dragState.w = w;
+              store.dragState.h = null;
+            });
             return;
           }
 
-          // TEXT — scale (left / corner)
+          // TEXT — scale
           if (isText && i.textResizeMode === "scale") {
             const scale = Math.max(0.5, 1 + -dx / i.startSize.width);
-
             const w = i.startSize.width * scale;
             const h = i.startSize.height * scale;
             const deltaW = w - i.startSize.width;
@@ -66,11 +70,13 @@ export default function useCanvasInteraction({ store, pageId }) {
             el.style.setProperty("--resize-h", `${h}px`);
             el.style.setProperty("--font-scale", scale);
 
-            store.dragState.active = true;
-            store.dragState.x = -deltaW / 2;
-            store.dragState.y = 0;
-            store.dragState.w = w;
-            store.dragState.h = h;
+            runInAction(() => {
+              store.dragState.active = true;
+              store.dragState.x = -deltaW / 2;
+              store.dragState.y = 0;
+              store.dragState.w = w;
+              store.dragState.h = h;
+            });
             return;
           }
 
@@ -99,28 +105,31 @@ export default function useCanvasInteraction({ store, pageId }) {
           el.style.setProperty("--drag-x", `${ox}px`);
           el.style.setProperty("--drag-y", `${oy}px`);
 
-          store.dragState.active = true;
-          store.dragState.x = ox;
-          store.dragState.y = oy;
-          store.dragState.w = w;
-          store.dragState.h = h;
+          runInAction(() => {
+            store.dragState.active = true;
+            store.dragState.x = ox;
+            store.dragState.y = oy;
+            store.dragState.w = w;
+            store.dragState.h = h;
+          });
           return;
         }
 
         /* ================= ROTATE ================= */
         if (i.type === "rotate") {
           const angle = getAngle(i.center.x, i.center.y, e.clientX, e.clientY);
-          const delta = angle - i.startAngle;
-          const rot = i.startRotation + delta;
+          const rot = i.startRotation + (angle - i.startAngle);
 
           el.style.setProperty("--rotate", `${rot}deg`);
 
-          store.dragState.active = true;
-          store.dragState.rotation = rot;
-          store.dragState.x = 0;
-          store.dragState.y = 0;
-          store.dragState.w = null;
-          store.dragState.h = null;
+          runInAction(() => {
+            store.dragState.active = true;
+            store.dragState.rotation = rot;
+            store.dragState.x = 0;
+            store.dragState.y = 0;
+            store.dragState.w = null;
+            store.dragState.h = null;
+          });
         }
       });
     },
@@ -145,6 +154,7 @@ export default function useCanvasInteraction({ store, pageId }) {
         el.style.removeProperty("--resize-w");
         el.style.removeProperty("--resize-h");
         el.style.removeProperty("--font-scale");
+        el.style.removeProperty("--rotate");
       }
 
       /* ---------- COMMIT MOVE ---------- */
@@ -162,9 +172,11 @@ export default function useCanvasInteraction({ store, pageId }) {
         const isText = i.blockType === "text";
 
         if (isText && i.textResizeMode === "width") {
-          const w = Math.max(50, i.startSize.width + dx);
           store.updateBlock(i.blockId, {
-            size: { width: w, height: i.startSize.height },
+            size: {
+              width: Math.max(50, i.startSize.width + dx),
+              height: i.startSize.height,
+            },
           });
         } else if (isText && i.textResizeMode === "scale") {
           const scale = Math.max(0.5, 1 - dx / 200);
@@ -205,19 +217,21 @@ export default function useCanvasInteraction({ store, pageId }) {
       /* ---------- COMMIT ROTATE ---------- */
       if (i.type === "rotate") {
         const angle = getAngle(i.center.x, i.center.y, e.clientX, e.clientY);
-        const delta = angle - i.startAngle;
         store.updateBlock(i.blockId, {
-          rotation: i.startRotation + delta,
+          rotation: i.startRotation + (angle - i.startAngle),
         });
       }
-      
-      store.dragState.active = false;
-      store.dragState.rotation = null;
-      store.dragState.x = 0;
-      store.dragState.y = 0;
-      store.dragState.w = null;
-      store.dragState.h = null;
-      store.isDragging = false;
+
+      /* ---------- FINAL RESET (ACTION) ---------- */
+      runInAction(() => {
+        store.dragState.active = false;
+        store.dragState.rotation = null;
+        store.dragState.x = 0;
+        store.dragState.y = 0;
+        store.dragState.w = null;
+        store.dragState.h = null;
+        store.isDragging = false;
+      });
 
       document.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("pointerup", endInteraction);
@@ -235,7 +249,9 @@ export default function useCanvasInteraction({ store, pageId }) {
       const block = store.getBlockById(blockId);
       if (!block) return;
 
-      store.isDragging = true;
+      runInAction(() => {
+        store.isDragging = true;
+      });
 
       const interaction = {
         type,

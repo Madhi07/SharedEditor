@@ -31,6 +31,7 @@ function BlockRenderer({ block, pageId, onSelect }) {
   -------------------------------------------------- */
   const onPointerDown = useCallback(
     (e) => {
+      if (e.detail > 1) return;
       if (isEditing) return;
 
       e.stopPropagation();
@@ -65,6 +66,20 @@ function BlockRenderer({ block, pageId, onSelect }) {
     if (!isEditing) return;
     if (!textRef.current) return;
 
+    // ✅ Seed existing text into the DOM ONCE
+    textRef.current.innerText = block.text || "";
+  }, [isEditing, block.text]);
+
+  useEffect(() => {
+    if (!isEditing) return;
+
+    // Ensure we have the "before" value if we entered edit mode externally (e.g. overlay dblclick)
+    if (!textBeforeEditRef.current) {
+      textBeforeEditRef.current = block.text || "";
+    }
+
+    if (!textRef.current) return;
+
     // Focus AFTER React commits contentEditable=true
     requestAnimationFrame(() => {
       textRef.current.focus();
@@ -81,14 +96,14 @@ function BlockRenderer({ block, pageId, onSelect }) {
   /* --------------------------------------------------
      Text input (live update only)
   -------------------------------------------------- */
-  const handleTextInput = useCallback(
-    (e) => {
-      store.updateBlock(block.id, {
-        text: e.target.innerText,
-      });
-    },
-    [block.id, store]
-  );
+  const handleTextInput =
+    useCallback();
+    // (e) => {
+    //   store.updateBlock(block.id, {
+    //     text: e.target.innerText,
+    //   });
+    // },
+    // [block.id, store]
 
   /* --------------------------------------------------
      Text blur → commit + measure ONCE
@@ -250,7 +265,7 @@ function BlockRenderer({ block, pageId, onSelect }) {
 
     update();
 
-    // 🔥 during drag, poll per frame
+    //  during drag, poll per frame
     if (store.isDragging) {
       let raf;
       const loop = () => {
@@ -260,7 +275,21 @@ function BlockRenderer({ block, pageId, onSelect }) {
       raf = requestAnimationFrame(loop);
       return () => cancelAnimationFrame(raf);
     }
-  }, [isSelected, store.isDragging]);
+
+    console.log("block.position?.x", block.position?.x);
+    console.log("block.position?.y", block.position?.y);
+    console.log("block.size?.width", block.size?.width);
+    console.log("block.size?.height", block.size?.height);
+    console.log("block.rotation", block.rotation);
+  }, [
+    isSelected,
+    store.isDragging,
+    block.position?.x,
+    block.position?.y,
+    block.size?.width,
+    block.size?.height,
+    block.rotation,
+  ]);
 
   /* --------------------------------------------------
      Render
@@ -271,13 +300,13 @@ function BlockRenderer({ block, pageId, onSelect }) {
       data-block-id={block.id}
       style={wrapperStyle}
       onPointerDown={onPointerDown}
+      onDoubleClick={onDoubleClick}
     >
       {block.type === "text" && (
         <div
           ref={textRef}
           contentEditable={isEditing}
           suppressContentEditableWarning
-          onDoubleClick={onDoubleClick}
           onInput={handleTextInput}
           onBlur={handleTextBlur}
           style={textStyle}

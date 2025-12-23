@@ -6,11 +6,17 @@ function SelectionOverlay({
   block,
   beginInteraction,
   onSelect = () => {},
+  onDoubleClick,
   canResize = true,
   cornerHandles = [],
   sideHandles = [],
 }) {
   const store = useCanvasStore();
+
+  // FIX: Resolve live block from store to avoid stale props from parent
+  const liveBlock = store.getBlockById?.(block.id) || block;
+  const currentBlock = liveBlock;
+  const isLocked = !!currentBlock.locked;
 
   // We REQUIRE a DOM rect (Infographics-style)
   const rect = store.activeRect;
@@ -18,9 +24,19 @@ function SelectionOverlay({
 
   const ds = store.dragState;
   const isActive = ds.active;
+  const isEditing = store.editingBlockId === currentBlock.id;
 
-  const width = isActive && ds.w != null ? ds.w : rect.width;
-  const height = isActive && ds.h != null ? ds.h : rect.height;
+  if (isEditing) return null;
+
+  const width =
+    store.dragState.active && store.dragState.w != null
+      ? store.dragState.w
+      : currentBlock.size.width;
+
+  const height =
+    store.dragState.active && store.dragState.h != null
+      ? store.dragState.h
+      : currentBlock.size.height;
 
   if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
 
@@ -30,7 +46,7 @@ function SelectionOverlay({
   const rotation =
     store.dragState.active && store.dragState.rotation != null
       ? store.dragState.rotation
-      : block.rotation ?? 0;
+      : currentBlock.rotation ?? 0;
 
   const wrapperStyle = {
     position: "fixed",
@@ -76,7 +92,7 @@ function SelectionOverlay({
 
     let textResizeMode = "normal";
 
-    if (block.type === "text" && type === "resize") {
+    if (currentBlock.type === "text" && type === "resize") {
       if (
         handle === "left" ||
         handle === "top-left" ||
@@ -90,7 +106,7 @@ function SelectionOverlay({
 
     beginInteraction?.(e, {
       type,
-      blockId: block.id,
+      blockId: currentBlock.id,
       handle,
       textResizeMode,
     });
@@ -112,19 +128,24 @@ function SelectionOverlay({
           cursor: "move",
           background: "transparent",
         }}
-        onPointerDown={(e) => startInteraction(e, "move")}
+        onPointerDown={(e) => {
+          if (isLocked) return;
+          startInteraction(e, "move");
+        }}
+        onDoubleClick={onDoubleClick}
         onClick={(e) => {
           e.stopPropagation();
-          onSelect(block.id);
+          onSelect(currentBlock.id);
         }}
       />
 
       {/* Corner resize handles */}
       {canResize &&
+        !isLocked &&
         cornerHandles
           .filter(({ id }) => {
             // TEXT → only top-left
-            if (block.type === "text") {
+            if (currentBlock.type === "text") {
               return id === "top-left";
             }
             // NON-TEXT → all
@@ -151,10 +172,11 @@ function SelectionOverlay({
 
       {/* Side resize handles */}
       {canResize &&
+        !isLocked &&
         sideHandles
           .filter(({ id }) => {
             // TEXT → only right
-            if (block.type === "text") {
+            if (currentBlock.type === "text") {
               return id === "right";
             }
             // NON-TEXT → all
@@ -216,7 +238,10 @@ function SelectionOverlay({
       >
         {/* ROTATE */}
         <button
-          onPointerDown={(e) => startInteraction(e, "rotate")}
+          onPointerDown={(e) => {
+            if (isLocked) return;
+            startInteraction(e, "rotate");
+          }}
           style={{
             padding: "4px 6px",
             cursor: "grab",
@@ -239,7 +264,7 @@ function SelectionOverlay({
 
         {/* MOVE */}
         <button
-          onPointerDown={(e) => startInteraction(e, "move")}
+          onPointerDown={(e) => {if (isLocked) return;startInteraction(e, "move")}}
           style={{
             padding: "4px 6px",
             cursor: "move",

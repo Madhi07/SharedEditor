@@ -1,8 +1,10 @@
 // components/AudioPlayer.js
 import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
-import {ensureAudioContextOnGesture,
+import {
+  ensureAudioContextOnGesture,
   getGlobalAudioContextIfExists,
-  resumeIfSuspended,} from '../utils/audio-helpers'
+  resumeIfSuspended,
+} from "../utils/audio-helpers";
 
 /** Tunables */
 const FADE_SEC = 0.006; // 6ms clickless fade
@@ -10,6 +12,7 @@ const FADE_SEC = 0.006; // 6ms clickless fade
 /** Single shared context + master (may be created lazily) */
 let AC = null;
 let MASTER = null;
+let HARD_STOP_TOKEN = 0;
 
 /** Small in-memory cache for decoded AudioBuffers */
 const cache = new Map();
@@ -65,7 +68,8 @@ async function fetchAudioArrayBufferWithFallback(audioUrl) {
    ------------------------- */
 async function decodeAudioBufferOffline(arrayBuffer) {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const OfflineCtx =
+    window.OfflineAudioContext || window.webkitOfflineAudioContext;
 
   if (OfflineCtx) {
     try {
@@ -86,7 +90,11 @@ async function decodeAudioBufferOffline(arrayBuffer) {
       if (typeof offline.decodeAudioData === "function") {
         const decoded = await new Promise((resolve, reject) => {
           try {
-            offline.decodeAudioData(arrayBuffer.slice(0), (res) => resolve(res), (err) => reject(err));
+            offline.decodeAudioData(
+              arrayBuffer.slice(0),
+              (res) => resolve(res),
+              (err) => reject(err)
+            );
           } catch (err) {
             reject(err);
           }
@@ -249,8 +257,12 @@ function stopClip(id, fast = false) {
     try {
       e.source.stop(0);
     } catch (err) {}
-    try { e.source.disconnect(); } catch {}
-    try { e.gain.disconnect(); } catch {}
+    try {
+      e.source.disconnect();
+    } catch {}
+    try {
+      e.gain.disconnect();
+    } catch {}
   } catch (err) {
     // swallow
   }
@@ -259,6 +271,7 @@ function stopClip(id, fast = false) {
 
 /** Stop and clear all playing/scheduled pieces */
 function stopAll() {
+  HARD_STOP_TOKEN++;
   for (const id of Array.from(active.keys())) {
     stopClip(id);
   }
@@ -268,7 +281,15 @@ function stopAll() {
    Create and schedule a single BufferSource for a clip
    This was startClip — now it ensures AC exists when needed.
    ------------------------- */
-function startClip(clip, timelineNow, masterVol, sessionAtStart, isPlayingRef, sessionRef) {
+function startClip(
+  clip,
+  timelineNow,
+  masterVol,
+  sessionAtStart,
+  hardTokenAtStart,
+  isPlayingRef,
+  sessionRef
+) {
   if (active.has(clip.id)) return;
 
   const startTL = Math.max(timelineNow, clip.startTime);
@@ -278,8 +299,14 @@ function startClip(clip, timelineNow, masterVol, sessionAtStart, isPlayingRef, s
   // getBuffer will decode without creating the global AC
   return getBuffer(clip.url)
     .then(async (buffer) => {
+      if (HARD_STOP_TOKEN !== hardTokenAtStart) return;
       // safety guards
-      if (!buffer || !isPlayingRef.current || sessionRef.current !== sessionAtStart) return;
+      if (
+        !buffer ||
+        !isPlayingRef.current ||
+        sessionRef.current !== sessionAtStart
+      )
+        return;
 
       // ensure there is a real playback AudioContext before scheduling
       const ac = await createAudioContextIfNeeded();
@@ -288,8 +315,16 @@ function startClip(clip, timelineNow, masterVol, sessionAtStart, isPlayingRef, s
       // if resume is needed (suspended), try to resume
       await resumeIfSuspended(ac);
 
-      // Re-check guards after decode/context creation
-      if (!isPlayingRef.current || sessionRef.current !== sessionAtStart) return;
+      if (
+        HARD_STOP_TOKEN !== hardTokenAtStart ||
+        !isPlayingRef.current ||
+        sessionRef.current !== sessionAtStart
+      )
+        return;
+
+      // // Re-check guards after decode/context creation
+      // if (!isPlayingRef.current || sessionRef.current !== sessionAtStart)
+      //   return;
 
       const when = ac.currentTime + (startTL - timelineNow);
       const offset = bufferOffsetFor(clip, startTL);
@@ -303,13 +338,23 @@ function startClip(clip, timelineNow, masterVol, sessionAtStart, isPlayingRef, s
 
       // *** UPDATED: prefer clip.volume (toolbar writes clip.volume). fallback to clip.gain for backward compat.
       // final per-clip scalar is: clip.volume (if present) -> clip.gain -> 1
-      const perClip = (clip.volume != null ? clip.volume : (clip.gain != null ? clip.gain : 1));
-      const targetGain = Math.max(0, Math.min(1, perClip)) * Math.max(0, Math.min(1, masterVol));
+      const perClip =
+        clip.volume != null ? clip.volume : clip.gain != null ? clip.gain : 1;
+      const targetGain =
+        Math.max(0, Math.min(1, perClip)) * Math.max(0, Math.min(1, masterVol));
 
       // Final guard
-      if (!isPlayingRef.current || sessionRef.current !== sessionAtStart) {
-        try { src.disconnect(); } catch {}
-        try { g.disconnect(); } catch {}
+      if (
+        HARD_STOP_TOKEN !== hardTokenAtStart ||
+        !isPlayingRef.current ||
+        sessionRef.current !== sessionAtStart
+      ) {
+        try {
+          src.disconnect();
+        } catch {}
+        try {
+          g.disconnect();
+        } catch {}
         return;
       }
 
@@ -326,14 +371,20 @@ function startClip(clip, timelineNow, masterVol, sessionAtStart, isPlayingRef, s
         src.connect(g).connect(MASTER || ac.destination);
       } catch (e) {
         // if MASTER not set, connect to destination
-        try { src.connect(ac.destination); } catch {}
+        try {
+          src.connect(ac.destination);
+        } catch {}
       }
 
       try {
         src.start(when, offset, dur);
       } catch (err) {
-        try { src.disconnect(); } catch {}
-        try { g.disconnect(); } catch {}
+        try {
+          src.disconnect();
+        } catch {}
+        try {
+          g.disconnect();
+        } catch {}
         return;
       }
 
@@ -346,11 +397,15 @@ function startClip(clip, timelineNow, masterVol, sessionAtStart, isPlayingRef, s
       // onended handler
       const onendedHandler = () => {
         if (active.has(clip.id)) {
-          try { src.onended = null; } catch {}
+          try {
+            src.onended = null;
+          } catch {}
           active.delete(clip.id);
         }
       };
-      try { src.onended = onendedHandler; } catch {}
+      try {
+        src.onended = onendedHandler;
+      } catch {}
 
       const endsAtCtx = when + dur;
       const entry = {
@@ -378,9 +433,15 @@ function startClip(clip, timelineNow, masterVol, sessionAtStart, isPlayingRef, s
         const cur = active.get(clip.id);
         if (!cur) return;
         if ((AC && AC.currentTime) >= endsAtCtx - 0.01) {
-          try { cur.source.onended = null; } catch {}
-          try { cur.source.disconnect(); } catch {}
-          try { cur.gain.disconnect(); } catch {}
+          try {
+            cur.source.onended = null;
+          } catch {}
+          try {
+            cur.source.disconnect();
+          } catch {}
+          try {
+            cur.gain.disconnect();
+          } catch {}
           active.delete(clip.id);
         } else {
           entry.teardownTimerId = setTimeout(teardown, 50);
@@ -428,7 +489,10 @@ const AudioPlayer = forwardRef(function AudioPlayer(
         const existingAC = getExistingAC();
         if (existingAC && MASTER) {
           try {
-            MASTER.gain.setValueAtTime(masterVolRef.current, existingAC.currentTime);
+            MASTER.gain.setValueAtTime(
+              masterVolRef.current,
+              existingAC.currentTime
+            );
           } catch (e) {
             // ignore
           }
@@ -455,7 +519,10 @@ const AudioPlayer = forwardRef(function AudioPlayer(
     const existingAC = getExistingAC();
     if (existingAC && MASTER) {
       try {
-        MASTER.gain.setValueAtTime(masterVolRef.current, existingAC.currentTime);
+        MASTER.gain.setValueAtTime(
+          masterVolRef.current,
+          existingAC.currentTime
+        );
       } catch (e) {}
     }
   }, [masterVolume]);
@@ -494,7 +561,7 @@ const AudioPlayer = forwardRef(function AudioPlayer(
       const existing = getExistingAC();
       if (existing) {
         try {
-          existing.suspend?.();
+          // existing.suspend?.();
         } catch (e) {}
       }
     }
@@ -538,9 +605,20 @@ const AudioPlayer = forwardRef(function AudioPlayer(
       }
 
       if (!active.has(clip.id)) {
-        if (inWindow(clip, currentTime) || inWindow(clip, currentTime + 0.001)) {
+        if (
+          inWindow(clip, currentTime) ||
+          inWindow(clip, currentTime + 0.001)
+        ) {
           // startClip returns a promise; we don't await it here
-          startClip(clip, currentTime, masterVolRef.current, sessionAtTick, isPlayingRef, sessionRef);
+          startClip(
+            clip,
+            currentTime,
+            masterVolRef.current,
+            sessionAtTick,
+            HARD_STOP_TOKEN,
+            isPlayingRef,
+            sessionRef
+          );
         }
       }
     }

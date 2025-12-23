@@ -97,8 +97,15 @@ function RealEditor({ ClipsData }) {
     totalDurationRef.current = totalDuration;
   }, [totalDuration]);
 
+  console.log(
+    "ClipsData*******___________",
+    ClipsData,
+    Array.isArray(ClipsData)
+  );
+
   const externalHasVisuals = useMemo(() => {
     try {
+      console.log("ClipsData*******", ClipsData, Array.isArray(ClipsData));
       if (ClipsData) {
         const dataEntry =
           Array.isArray(ClipsData) && ClipsData.length
@@ -121,6 +128,8 @@ function RealEditor({ ClipsData }) {
     );
     return !!existingVisualsFromExternal;
   }, [ClipsData, clips]);
+
+  console.log("clips_____", clips);
 
   // ----- create shared canvasStore for annotations (single page "video-page") -----
   const canvasStore = useCanvasStore();
@@ -151,57 +160,57 @@ function RealEditor({ ClipsData }) {
   }, []);
 
   // ---------- DEFAULT CLIP METADATA LOADER (uses memoized externalHasVisuals)
-  useEffect(() => {
-    // If external visuals exist, keep original behaviour: skip default clip load
-    if (externalHasVisuals) {
-      return;
-    }
+  // useEffect(() => {
+  //   // If external visuals exist, keep original behaviour: skip default clip load
+  //   if (externalHasVisuals) {
+  //     return;
+  //   }
 
-    const defaultClip = clips.find((c) => c.id === "default-clip");
-    if (!defaultClip) return;
+  //   const defaultClip = clips.find((c) => c.id === "default-clip");
+  //   if (!defaultClip) return;
 
-    const loadDefaultMetadata = async () => {
-      try {
-        const video = document.createElement("video");
-        video.src = defaultClip.url;
-        video.crossOrigin = "anonymous";
+  //   const loadDefaultMetadata = async () => {
+  //     try {
+  //       const video = document.createElement("video");
+  //       video.src = defaultClip.url;
+  //       video.crossOrigin = "anonymous";
 
-        video.onloadedmetadata = async () => {
-          const durationSec = video.duration;
+  //       video.onloadedmetadata = async () => {
+  //         const durationSec = video.duration;
 
-          let thumbnail = null;
-          try {
-            const response = await fetch(defaultClip.url);
-            const blob = await response.blob();
-            thumbnail = await extractThumbnailFromVideo(blob, 1);
-            if (thumbnail) new Image().src = thumbnail;
-          } catch (err) {
-            console.warn("⚠️ Failed to extract default video thumbnail:", err);
-          }
+  //         let thumbnail = null;
+  //         try {
+  //           const response = await fetch(defaultClip.url);
+  //           const blob = await response.blob();
+  //           thumbnail = await extractThumbnailFromVideo(blob, 1);
+  //           if (thumbnail) new Image().src = thumbnail;
+  //         } catch (err) {
+  //           console.warn("⚠️ Failed to extract default video thumbnail:", err);
+  //         }
 
-          updateClips(
-            (clipsRef.current || []).map((c) =>
-              c.id === "default-clip"
-                ? {
-                    ...c,
-                    duration: durationSec,
-                    endTime: durationSec,
-                    thumbnail,
-                  }
-                : c
-            )
-          );
-          setTotalDuration(durationSec);
-        };
-      } catch (err) {
-        console.error("Failed to load default video metadata:", err);
-      }
-    };
+  //         updateClips(
+  //           (clipsRef.current || []).map((c) =>
+  //             c.id === "default-clip"
+  //               ? {
+  //                   ...c,
+  //                   duration: durationSec,
+  //                   endTime: durationSec,
+  //                   thumbnail,
+  //                 }
+  //               : c
+  //           )
+  //         );
+  //         setTotalDuration(durationSec);
+  //       };
+  //     } catch (err) {
+  //       console.error("Failed to load default video metadata:", err);
+  //     }
+  //   };
 
-    // run loader
-    loadDefaultMetadata();
-    // intentionally only re-run if externalHasVisuals changes (it won't after mount in normal flow)
-  }, [externalHasVisuals]); // run once on mount / if externalHasVisuals changes
+  //   // run loader
+  //   loadDefaultMetadata();
+  //   // intentionally only re-run if externalHasVisuals changes (it won't after mount in normal flow)
+  // }, [externalHasVisuals]); // run once on mount / if externalHasVisuals changes
 
   useEffect(() => {
     if (!clips.length) return;
@@ -258,7 +267,7 @@ function RealEditor({ ClipsData }) {
         const merged = [...reflowedVisuals, ...nonVisuals];
 
         // update tracks for audio layers (reuse your helper)
-        return fixAudioTrackLayers(merged);
+        return assignTracks(merged);
       });
 
       // After setClips (state update queued), schedule a sync to ClipsData JSON
@@ -523,7 +532,7 @@ function RealEditor({ ClipsData }) {
       track,
     };
 
-    setClips((prev) => fixAudioTrackLayers([...prev, newClip]));
+    setClips((prev) => assignTracks([...prev, newClip]));
 
     if (!selectedClipId) setSelectedClipId(newClip.id);
   };
@@ -569,38 +578,90 @@ function RealEditor({ ClipsData }) {
   };
 
   // replace the const version with this hoisted function so it's available earlier
-  function fixAudioTrackLayers(clipsArr) {
-    const audioClips = clipsArr.filter((c) => c.type === "audio");
-    const sorted = [...audioClips].sort((a, b) => a.startTime - b.startTime);
-    const layers = [];
+  // function fixAudioTrackLayers(clipsArr) {
+  //   const audioClips = clipsArr.filter((c) => c.type === "audio");
+  //   const sorted = [...audioClips].sort((a, b) => a.startTime - b.startTime);
+  //   const layers = [];
 
-    sorted.forEach((clip) => {
+  //   sorted.forEach((clip) => {
+  //     let placed = false;
+  //     for (const layer of layers) {
+  //       const last = layer[layer.length - 1];
+  //       if (clip.startTime >= last.endTime) {
+  //         layer.push(clip);
+  //         placed = true;
+  //         break;
+  //       }
+  //     }
+  //     if (!placed) layers.push([clip]);
+  //   });
+
+  //   const layered = layers.flatMap((layer, i) =>
+  //     layer.map((clip) => ({ ...clip, track: i }))
+  //   );
+
+  //   return clipsArr.map((c) => {
+  //     const match = layered.find((a) => a.id === c.id);
+  //     return match ? { ...c, track: match.track } : c;
+  //   });
+  // }
+
+  function assignTracks(clips) {
+    const next = clips.map((c) => ({ ...c }));
+
+    // ---- TEXT: -1, -2, -3 ----
+    const texts = next
+      .filter((c) => c.type === "text")
+      .sort((a, b) => a.startTime - b.startTime);
+
+    texts.forEach((clip, i) => {
+      clip.track = -1 - i;
+    });
+
+    // ---- VIDEO / IMAGE: track 0 ----
+    next.forEach((c) => {
+      if (c.type === "video" || c.type === "image") {
+        c.track = 0;
+      }
+    });
+
+    // ---- AUDIO: 1,2,3… no overlap per lane ----
+    const audios = next
+      .filter((c) => c.type === "audio")
+      .sort((a, b) => a.startTime - b.startTime);
+
+    const lanes = [];
+
+    audios.forEach((clip) => {
       let placed = false;
-      for (const layer of layers) {
-        const last = layer[layer.length - 1];
-        if (clip.startTime >= last.endTime) {
-          layer.push(clip);
+
+      for (let i = 0; i < lanes.length; i++) {
+        const lane = lanes[i];
+        const overlap = lane.some(
+          (c) => !(clip.endTime <= c.startTime || clip.startTime >= c.endTime)
+        );
+
+        if (!overlap) {
+          clip.track = i + 1;
+          lane.push(clip);
           placed = true;
           break;
         }
       }
-      if (!placed) layers.push([clip]);
+
+      if (!placed) {
+        clip.track = lanes.length + 1;
+        lanes.push([clip]);
+      }
     });
 
-    const layered = layers.flatMap((layer, i) =>
-      layer.map((clip) => ({ ...clip, track: i }))
-    );
-
-    return clipsArr.map((c) => {
-      const match = layered.find((a) => a.id === c.id);
-      return match ? { ...c, track: match.track } : c;
-    });
+    return next;
   }
 
   // New handleAutoLayerFix: apply audio layering, set clips, and sync the new visual order
   const handleAutoLayerFix = useCallback(
     (updatedClips) => {
-      const fixed = fixAudioTrackLayers(updatedClips);
+      const fixed = assignTracks(updatedClips);
       setClips(fixed);
 
       // Sync to ClipsData (use microtask so clipsRef.current is up-to-date)
@@ -1374,7 +1435,7 @@ function RealEditor({ ClipsData }) {
     // replace app clips state (assumes setClips + fixAudioTrackLayers exist in your file)
     setClips(() => {
       const marked = newClips.map((c) => ({ ...c, externalSource: true }));
-      return fixAudioTrackLayers(marked);
+      return assignTracks(marked);
     });
 
     // ensure selection and totalDuration update after setClips
@@ -1429,6 +1490,7 @@ function RealEditor({ ClipsData }) {
       if (opts?.originalEvent) {
         opts.originalEvent.stopPropagation();
       }
+
       const rect = lastCanvasClick?.overlayRect;
 
       const centerX = rect
@@ -1447,41 +1509,52 @@ function RealEditor({ ClipsData }) {
         ? lastCanvasClick.y
         : 40;
 
-      const payload = {
+      const startTime = opts.startTime ?? currentTime;
+      const duration = opts.duration ?? 5;
+      const endTime = startTime + duration;
+
+      /** 1️ Create canvas block (visual only) */
+      const block = canvasStore.addTextBlock(pageId, {
         x: centerX,
         y: centerY,
-        text: opts.text ?? "New text",
-        startTime: opts.startTime ?? currentTime,
-        duration: opts.duration ?? 5,
+        text: opts.text ?? "Neww Text",
         style: opts.style ?? {},
-      };
+      });
 
-      let created = null;
+      if (!block?.id) return;
 
-      try {
-        created = canvasStore.addTextBlock(pageId, payload);
-      } catch (e) {
-        console.error("createTextBlock failed:", e);
-        setToolbarVisible(false);
-        return;
-      }
+      /** 2 Create timeline clip (NORMALIZED) */
+      setClips((prev) => [
+        ...prev,
+        {
+          id: `clip-${block.id}`, // stable link
+          blockId: block.id,
+          type: "text",
 
-      if (!created?.id) {
-        setToolbarVisible(false);
-        return;
-      }
+          // ⏱ timeline fields
+          startTime,
+          endTime,
+          duration,
 
-      // ✅ SINGLE source of truth
-      canvasStore.select(created.id);
+          // REQUIRED for timeline math
+          trimStart: 0,
+          trimEnd: 0,
+
+          //  text lives ABOVE video track
+          track: -1,
+        },
+      ]);
+
+      /** 3️⃣ Select + edit */
+      canvasStore.select(block.id);
       canvasStore.setSelectionMode("text");
 
-      // autofocus text editor
       requestAnimationFrame(() => {
-        const el = canvasStore.getBlockRef(pageId, created.id);
+        const el = canvasStore.getBlockRef(pageId, block.id);
         el?.querySelector("[contenteditable]")?.focus();
       });
     },
-    [canvasStore, currentTime, pageId, lastCanvasClick]
+    [canvasStore, currentTime, pageId, lastCanvasClick, setClips]
   );
 
   // Hide toolbar ONLY when clicking outside AND nothing is selected
@@ -1574,6 +1647,16 @@ function RealEditor({ ClipsData }) {
       );
     }
   }, [activeBlock]);
+
+  const textBlockMap = new Map();
+
+  canvasStore.project.pages.forEach((page) => {
+    page.blocks?.forEach((block) => {
+      if (block.type === "text") {
+        textBlockMap.set(block.id, block);
+      }
+    });
+  });
 
   return (
     <div className=" bg-white text-gray-900 font-sans w-full flex flex-col items-center justify-center">
@@ -1763,6 +1846,7 @@ function RealEditor({ ClipsData }) {
         <div className="px-4 py-0 w-full overflow-scroll">
           <Timeline
             clips={clips}
+            textBlockMap={textBlockMap}
             onSplitAudio={handleSplitAudio}
             currentTime={currentTime}
             totalDuration={totalDuration}

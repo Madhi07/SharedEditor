@@ -17,13 +17,11 @@ function genId(prefix = "b") {
  * Now we also add a `meta` object so store.applyCommand can reliably read cmd.meta.pageId / cmd.meta.editor.
  */
 function withMeta(core, meta = {}) {
-  // keep existing top-level fields (name, beforeSnapshot, afterSnapshot, etc.)
-  // AND include a `meta` object so applyCommand can read cmd.meta.* consistently.
-  return Object.assign({}, meta, {
+  return {
     do: core.do,
     undo: core.undo,
-    meta: Object.assign({}, meta),
-  });
+    meta: { ...meta },
+  };
 }
 
 /* -------------------------
@@ -211,7 +209,7 @@ export function AddBlockCommand({ pageId = null, createdBlock = null } = {}) {
     {
       name: "AddBlockCommand",
       beforeSnapshot: null,
-      afterSnapshot: { id: createdId, block: clone(created) },
+      afterSnapshot: created ? { id: createdId, block: clone(created) } : null,
     }
   );
 }
@@ -265,18 +263,14 @@ export function LockUnlockCommand(blockId, oldLocked, newLocked) {
 /* -------------------------
    DuplicateCommand
    ------------------------- */
-export function DuplicateCommand({
-  pageId = null,
-  createdBlock = null,
-  originalBlock = null,
-} = {}) {
-  if (!createdBlock && !originalBlock)
-    throw new Error(
-      "DuplicateCommand: must provide createdBlock or originalBlock"
-    );
-  let created = createdBlock ? clone(createdBlock) : null;
-  const orig = originalBlock ? clone(originalBlock) : null;
-  let createdId = created?.id ?? null;
+export function DuplicateCommand({ pageId = null, originalBlock } = {}) {
+  if (!originalBlock) {
+    throw new Error("DuplicateCommand requires originalBlock");
+  }
+
+  const orig = clone(originalBlock);
+  let created = null;
+  let createdId = null;
 
   return withMeta(
     {
@@ -285,43 +279,52 @@ export function DuplicateCommand({
         const page = store.project.pages.find((p) => p.id === pid);
         if (!page) return;
 
-        if (!created) {
-          const copy = clone(orig);
-          copy.id = genId("b");
-          if (copy.position)
-            copy.position = {
-              x: (copy.position.x || 0) + 12,
-              y: (copy.position.y || 0) + 12,
-            };
-          created = copy;
-          createdId = copy.id;
-        }
+        const maxZ =
+          Math.max(...page.blocks.map((b) => b.zIndex ?? 0), orig.zIndex ?? 0) +
+          1;
 
-        const pIdx = store.project.pages.findIndex((p) => p.id === pid);
-        if (pIdx === -1) return;
-        store.project.pages[pIdx].blocks = [
-          ...store.project.pages[pIdx].blocks,
-          clone(created),
-        ];
+        created = {
+          ...clone(orig),
+          id: genId("b"),
+          position: orig.position
+            ? {
+                x: (orig.position.x || 0) + 12,
+                y: (orig.position.y || 0) + 12,
+              }
+            : undefined,
+          zIndex: maxZ,
+        };
+
+        createdId = created.id;
+
+        page.blocks = [...page.blocks, created];
+
+        // ✅ select duplicated block
+        store.select?.(createdId);
       },
+
       undo(store) {
         const pid = pageId ?? store.activePageId;
         const page = store.project.pages.find((p) => p.id === pid);
         if (!page) return;
+
         page.blocks = page.blocks.filter((b) => b.id !== createdId);
+
+        // restore selection
+        store.select?.(orig.id);
       },
     },
     {
-      name: "DuplicateCommand",
-      beforeSnapshot: { original: clone(orig) },
-      afterSnapshot: { createdId, created: clone(created) },
+      name: "DuplicateBlock",
+      beforeSnapshot: { originalId: orig.id },
+      afterSnapshot: { createdId },
     }
   );
 }
 
 /* -------------------------
-   DeleteBlockCommand
-   ------------------------- */
+   DeleteBlockCommand (FIXED)
+------------------------- */
 export function DeleteBlockCommand(blockId) {
   let oldBlock = null;
   let oldIndex = -1;
@@ -330,26 +333,30 @@ export function DeleteBlockCommand(blockId) {
   return withMeta(
     {
       do(store) {
-        const page = store.findPageContainingBlock?.(blockId) || store.activePage;
+        const page =
+          store.findPageContainingBlock?.(blockId) || store.activePage;
         if (!page) return;
+
         pageId = page.id;
-        const idx = page.blocks.findIndex((b) => b.id === blockId);
-        if (idx === -1) return;
-        oldIndex = idx;
-        oldBlock = clone(page.blocks[idx]);
+        oldIndex = page.blocks.findIndex((b) => b.id === blockId);
+        if (oldIndex === -1) return;
+
+        oldBlock = clone(page.blocks[oldIndex]);
         page.blocks = page.blocks.filter((b) => b.id !== blockId);
 
-        if (typeof store.ensureGroupRemovedForBlock === "function") {
-          store.ensureGroupRemovedForBlock(blockId);
-        }
+        store.ensureGroupRemovedForBlock?.(blockId);
+        store.clearSelection?.(); // ✅ clear selection
       },
       undo(store) {
         const page =
-          store.project.pages.find((p) => p.id === pageId) ?? store.activePage;
+          store.project.pages.find((p) => p.id === pageId) || store.activePage;
         if (!page || !oldBlock) return;
+
         const blocks = page.blocks.slice();
         blocks.splice(oldIndex, 0, oldBlock);
         page.blocks = blocks;
+
+        store.select?.(oldBlock.id); // ✅ restore selection
       },
     },
     {
@@ -467,7 +474,10 @@ export function UngroupCommand(groupId, blockIds = null) {
       undo(store) {
         const page = store.activePage;
         page.blocks = page.blocks.map((b) => {
-          if (oldGroups && Object.prototype.hasOwnProperty.call(oldGroups, b.id)) {
+          if (
+            oldGroups &&
+            Object.prototype.hasOwnProperty.call(oldGroups, b.id)
+          ) {
             return { ...b, groupId: oldGroups[b.id] };
           }
           return b;
