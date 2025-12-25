@@ -1,30 +1,32 @@
 // pages/index.js
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import { observer } from "mobx-react-lite";
 import VideoPlayer from "./VideoPlayer";
 import Timeline from "./Timeline";
 import SelectionToolbar from "../SharedComponent/SelectionToolbar";
+import importTimelineClipsFromMediaData from "../utils/adapters/importFromMediaData";
+import exportToMediaData from "../utils/adapters/exportToMediaData";
 import {
   useCanvasStore,
   useCanvasStoreReactive,
 } from "../context/CanvasStoreContext";
+import { fontFamilies } from "../utils/canvasUtils/canvasConfig";
 import * as editorActions from "../utils/canvasUtils/editorActions";
-import * as commands from "../SharedStore/Commands";
-import MediaUploader from "./MediaUploader";
-import { Toolbar } from "./Toolbar";
+// import MediaUploader from "./MediaUploader";
+// import { Toolbar } from "./Toolbar";
 import {
   extractThumbnailFromVideo,
   getImageThumbnail,
 } from "@/utils/thumbnailExtractor";
 import useCanvasSelection from "../hooks/useCanvasSelection";
-
-import {
-  hasNumericSize,
-  cornerHandles,
-  textSideHandles,
-  imageSideHandles,
-  fontFamilies,
-} from "../utils/canvasUtils/canvasConfig";
 
 import AudioPlayer from "./AudioPlayer";
 
@@ -40,7 +42,7 @@ async function fetchExternalClips() {
   }
 }
 
-function RealEditor({ ClipsData }) {
+const RealEditor = forwardRef(function RealEditor({ ClipsData }, ref) {
   const [clips, setClips] = useState([
     {
       id: "default-clip",
@@ -63,6 +65,7 @@ function RealEditor({ ClipsData }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [totalDuration, setTotalDuration] = useState(10);
+  const [importedTextBlocks, setImportedTextBlocks] = useState([]);
   const [videoZoom, setVideoZoom] = useState(1);
   const [seekAudio, setSeekAudio] = useState(0);
   const [externalClipsJson, setExternalClipsJson] = useState(() => {
@@ -103,36 +106,8 @@ function RealEditor({ ClipsData }) {
     Array.isArray(ClipsData)
   );
 
-  const externalHasVisuals = useMemo(() => {
-    try {
-      console.log("ClipsData*******", ClipsData, Array.isArray(ClipsData));
-      if (ClipsData) {
-        const dataEntry =
-          Array.isArray(ClipsData) && ClipsData.length
-            ? ClipsData.find((d) => Array.isArray(d.slides)) || ClipsData[0]
-            : ClipsData;
-        const slides = Array.isArray(dataEntry?.slides)
-          ? dataEntry.slides
-          : Array.isArray(ClipsData) &&
-            ClipsData.every((s) => s && (s.image || s.image_url || s.url))
-          ? ClipsData
-          : null;
-        if (slides && slides.length) return true;
-      }
-    } catch (e) {
-      // ignore
-    }
-    // runtime flag: if clips already contain non-default visual items that came from remote
-    const existingVisualsFromExternal = (clips || []).some(
-      (c) => (c.type === "image" || c.type === "video") && c.externalSource
-    );
-    return !!existingVisualsFromExternal;
-  }, [ClipsData, clips]);
-
-  console.log("clips_____", clips);
-
   // ----- create shared canvasStore for annotations (single page "video-page") -----
-  const canvasStore = useCanvasStore();
+  const canvasStore = useCanvasStoreReactive();
 
   // const canvas = useCanvasStoreReactive();
 
@@ -158,6 +133,10 @@ function RealEditor({ ClipsData }) {
   const stopAllAudio = useCallback(() => {
     audioPlayerRef.current?.stopAll?.();
   }, []);
+
+  useEffect(() => {
+    console.log("clips data", clips);
+  }, [clips]);
 
   // ---------- DEFAULT CLIP METADATA LOADER (uses memoized externalHasVisuals)
   // useEffect(() => {
@@ -211,6 +190,44 @@ function RealEditor({ ClipsData }) {
   //   loadDefaultMetadata();
   //   // intentionally only re-run if externalHasVisuals changes (it won't after mount in normal flow)
   // }, [externalHasVisuals]); // run once on mount / if externalHasVisuals changes
+
+  useImperativeHandle(ref, () => ({
+    async save() {
+      if (!ClipsData?.id) {
+        throw new Error("Cannot save: ClipsData.id is missing");
+      }
+
+      const exportJson = exportToMediaData({
+        slidesSource: ClipsData,
+        clips,
+        canvasStore,
+      });
+
+      console.log(" EXPORT JSON", exportJson.data);
+      console.log("clipsData Id", ClipsData)
+
+      const res = await fetch(
+        `https://media-v2.episyche.com/media/reels/${ClipsData.id}/`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(exportJson.data),
+        }
+      );
+
+      const responseText = await res.text();
+      console.log("❌ SAVE RESPONSE STATUS:", res.status);
+      console.log("❌ SAVE RESPONSE BODY:", responseText);
+
+      if (!res.ok) {
+        throw new Error(responseText || "Failed to save media");
+      }
+
+      return exportJson.data;
+    },
+  }));
 
   useEffect(() => {
     if (!clips.length) return;
@@ -425,18 +442,6 @@ function RealEditor({ ClipsData }) {
     //     video_thumbnail: s.video?.video_thumbnail,
     //   }))
     // );
-
-    // attempt to save server-side (optional)
-    try {
-      await fetch("/api/save-clips", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clips: newJson }),
-      });
-      console.log("Saved updated ClipsData to server output.js");
-    } catch (err) {
-      console.warn("Failed to save ClipsData to server:", err);
-    }
   }, []);
 
   const handleClipEnd = useCallback(
@@ -609,39 +614,60 @@ function RealEditor({ ClipsData }) {
   function assignTracks(clips) {
     const next = clips.map((c) => ({ ...c }));
 
-    // ---- TEXT: -1, -2, -3 ----
-    const texts = next
+    // ---------- TEXT (like audio, but negative tracks) ----------
+    const textClips = next
       .filter((c) => c.type === "text")
       .sort((a, b) => a.startTime - b.startTime);
 
-    texts.forEach((clip, i) => {
-      clip.track = -1 - i;
+    const textLanes = []; // each lane is an array of non-overlapping clips
+
+    textClips.forEach((clip) => {
+      let placed = false;
+
+      for (let i = 0; i < textLanes.length; i++) {
+        const lane = textLanes[i];
+        const overlaps = lane.some(
+          (c) => !(clip.endTime <= c.startTime || clip.startTime >= c.endTime)
+        );
+
+        if (!overlaps) {
+          clip.track = -1 - i;
+          lane.push(clip);
+          placed = true;
+          break;
+        }
+      }
+
+      if (!placed) {
+        clip.track = -1 - textLanes.length;
+        textLanes.push([clip]);
+      }
     });
 
-    // ---- VIDEO / IMAGE: track 0 ----
+    // ---------- VIDEO / IMAGE ----------
     next.forEach((c) => {
       if (c.type === "video" || c.type === "image") {
         c.track = 0;
       }
     });
 
-    // ---- AUDIO: 1,2,3… no overlap per lane ----
+    // ---------- AUDIO (unchanged) ----------
     const audios = next
       .filter((c) => c.type === "audio")
       .sort((a, b) => a.startTime - b.startTime);
 
-    const lanes = [];
+    const audioLanes = [];
 
     audios.forEach((clip) => {
       let placed = false;
 
-      for (let i = 0; i < lanes.length; i++) {
-        const lane = lanes[i];
-        const overlap = lane.some(
+      for (let i = 0; i < audioLanes.length; i++) {
+        const lane = audioLanes[i];
+        const overlaps = lane.some(
           (c) => !(clip.endTime <= c.startTime || clip.startTime >= c.endTime)
         );
 
-        if (!overlap) {
+        if (!overlaps) {
           clip.track = i + 1;
           lane.push(clip);
           placed = true;
@@ -650,8 +676,8 @@ function RealEditor({ ClipsData }) {
       }
 
       if (!placed) {
-        clip.track = lanes.length + 1;
-        lanes.push([clip]);
+        clip.track = audioLanes.length + 1;
+        audioLanes.push([clip]);
       }
     });
 
@@ -1207,265 +1233,328 @@ function RealEditor({ ClipsData }) {
       tryOnce(false);
     });
 
-  // async function: builds clips array from ClipsData and replaces app clips state
-  const buildAndReplaceClipsFromClipsData = async () => {
-    if (!ClipsData) return;
+  useEffect(() => {
+    if (!ClipsData || !Array.isArray(ClipsData.slides)) return;
 
-    // Find slides array (support both shapes)
-    const dataEntry =
-      Array.isArray(ClipsData) && ClipsData.length
-        ? ClipsData.find((d) => Array.isArray(d.slides)) || ClipsData[0]
-        : ClipsData;
-    if (!dataEntry) return;
+    // TEMP FLAG (very important during transition)
+    const USE_NEW_ADAPTER = true;
+    if (!USE_NEW_ADAPTER) return;
 
-    const slides = Array.isArray(dataEntry.slides)
-      ? dataEntry.slides
-      : Array.isArray(ClipsData) &&
-        ClipsData.every(
-          (s) =>
-            s && (s.image || s.image_url || s.url || s.video_url || s.video)
-        )
-      ? ClipsData
-      : null;
-    if (!slides || !slides.length) return;
+    console.log("🔄 Importing timeline from mediaData adapter");
 
-    // Helper: deep clone
-    const deepClone = (o) => {
-      try {
-        return typeof structuredClone === "function"
-          ? structuredClone(o)
-          : JSON.parse(JSON.stringify(o));
-      } catch {
-        return JSON.parse(JSON.stringify(o));
-      }
-    };
+    const { clips: importedClips, textBlocks: importedCanvasTextBlocks } =
+      importTimelineClipsFromMediaData(ClipsData);
 
-    // Pre-read audio durations in parallel (best-effort)
-    const audioDurationPromises = slides.map((s, idx) => {
-      const audioUrl = s?.audio?.audio_url || s?.audio_url || null;
-      const slideAudioDuration = s?.audio?.duration ?? null;
-      if (!audioUrl)
-        return Promise.resolve(
-          slideAudioDuration != null ? Number(slideAudioDuration) : null
-        );
+    console.log("import", importedClips , "text Blocks", importedCanvasTextBlocks)
 
-      // getRemoteMediaDuration should exist in your file (robust helper recommended)
-      return getRemoteMediaDuration(
-        audioUrl,
-        "audio",
-        slideAudioDuration || 3,
-        {
-          timeoutMs: 8000,
-          tryCrossOrigin: true,
-        }
-      )
-        .then((d) => {
-          if (d == null)
-            return slideAudioDuration != null ? Number(slideAudioDuration) : 3;
-          return d;
-        })
-        .catch(() =>
-          slideAudioDuration != null ? Number(slideAudioDuration) : 3
-        );
-    });
+    setImportedTextBlocks(importedCanvasTextBlocks || []);
 
-    // Pre-read video durations in parallel (if needed)
-    const videoDurationPromises = slides.map((s) => {
-      const videoUrl =
-        (s.video && (s.video.video_url || s.video.url)) ||
-        s.video_url ||
-        s.videoUrl ||
-        null;
-      const providedDuration =
-        Number(
-          s.duration ||
-            (s.video && (s.video.duration || s.video.video_duration)) ||
-            0
-        ) || 0;
-      if (!videoUrl) return Promise.resolve(null);
-      if (providedDuration > 0) return Promise.resolve(providedDuration);
-      return getRemoteMediaDuration(videoUrl, "video", null, {
-        timeoutMs: 10000,
-        tryCrossOrigin: true,
-      });
-    });
+    if (!importedClips.length) {
+      console.warn("⚠️ Adapter returned no clips");
+      return;
+    }
 
-    const [audioDurations, videoDurations] = await Promise.all([
-      Promise.all(audioDurationPromises),
-      Promise.all(videoDurationPromises),
-    ]);
-
-    // tiny helper to test whether a URL looks like an image
-    const isLikelyImage = (url) => {
-      if (!url || typeof url !== "string") return false;
-      if (url.startsWith("data:image/")) return true;
-      return /\.(png|jpe?g|gif|webp|avif|svg)(\?.*)?$/i.test(url);
-    };
-
-    // Build clips sequentially
-    const newClips = [];
-    let visualCursor = 0;
-
-    for (let i = 0; i < slides.length; i++) {
-      const slide = slides[i];
-      const imageObj = slide.image || {};
-      const audioObj = slide.audio || {};
-      const videoObj = slide.video || {};
-
-      const videoUrl =
-        videoObj.video_url ||
-        videoObj.url ||
-        slide.video_url ||
-        slide.videoUrl ||
-        null;
-
-      const imageUrl =
-        imageObj.image_url ||
-        slide.image_url ||
-        slide.imageUrl ||
-        slide.url ||
-        null;
-
-      const isVideo = !!videoUrl;
-
-      // Pick visual duration
-      let visualDuration = 0;
-      if (isVideo) {
-        visualDuration =
-          Number(videoObj.duration || videoObj.video_duration) ||
-          Number(videoDurations[i]) ||
-          3;
-      } else {
-        visualDuration =
-          Number(
-            imageObj.duration || imageObj.image_duration || slide.duration
-          ) || 3;
-      }
-
-      const visualId =
-        slide.uuid ||
-        `visual-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      const visualStart = visualCursor;
-      const visualEnd = visualStart + visualDuration;
-
-      // Choose thumbnail:
-      // - For videos: prefer slide.video_thumbnail (your canonical field)
-      // - For images: use the image url (you said you don't send separate thumbnails for images)
-      let chosenThumbnail = null;
-      if (isVideo) {
-        chosenThumbnail =
-          (slide.video &&
-            (slide.video.video_thumbnail || slide.video.Video_thumbnail)) ||
-          slide.video_thumbnail ||
-          // optional older fallback if present:
-          slide.thumbnail ||
-          videoObj.thumbnail ||
-          null;
-
-        // Validate: if the chosen value is obviously not an image (e.g. an mp3 link),
-        // we don't set a thumbnail (UI will show Loading... fallback).
-        if (!isLikelyImage(chosenThumbnail)) {
-          chosenThumbnail = null;
-        }
-      } else {
-        chosenThumbnail = imageUrl || null; // image itself is the thumbnail
-      }
-
-      // Build clip
-      const visualClip = {
-        id: visualId,
-        type: isVideo ? "video" : "image",
-        url: isVideo ? videoUrl || "" : imageUrl || "",
-        fileName: isVideo
-          ? (videoUrl || "").split("/").pop()
-          : imageUrl
-          ? imageUrl.split("/").pop()
-          : `image-${visualId}`,
-        mimeType: isVideo
-          ? videoObj.mimeType || "video/mp4"
-          : imageUrl?.endsWith(".png")
-          ? "image/png"
-          : "image/jpeg",
-        duration: visualDuration,
-        startTime: visualStart,
-        endTime: visualEnd,
-        trimStart: 0,
-        trimEnd: 0,
-        hasAudio: !!(audioObj && audioObj.audio_url) || !!isVideo,
-        thumbnail: chosenThumbnail,
-        track: 0,
-        _rawSlide: deepClone(slide),
-      };
-
-      newClips.push(visualClip);
-
-      // Attach independent audio clip if slide provides audio_url
-      if (audioObj && audioObj.audio_url) {
-        const audioDur =
-          audioDurations &&
-          typeof audioDurations[i] !== "undefined" &&
-          audioDurations[i] != null
-            ? audioDurations[i]
-            : Number(audioObj.duration) || 3;
-
-        const audioClip = {
-          id: `${audioObj.uuid || visualId}-audio`,
-          type: "audio",
-          url: audioObj.audio_url,
-          fileName: audioObj.audio_url.split("/").pop(),
-          mimeType: "audio/mpeg",
-          duration: audioDur,
-          startTime: visualStart,
-          endTime: visualStart + audioDur,
-          trimStart: 0,
-          trimEnd: 0,
-          hasAudio: true,
-          thumbnail: null,
-          track: 0,
-        };
-
-        newClips.push(audioClip);
-      }
-
-      visualCursor = visualEnd;
-    } // end for
-
-    if (!newClips.length) return;
-
-    // replace app clips state (assumes setClips + fixAudioTrackLayers exist in your file)
     setClips(() => {
-      const marked = newClips.map((c) => ({ ...c, externalSource: true }));
+      const marked = importedClips.map((c) => ({
+        ...c,
+        externalSource: true,
+      }));
       return assignTracks(marked);
     });
 
-    // ensure selection and totalDuration update after setClips
+    // timeline selection + duration safety
     setTimeout(() => {
-      const allClipsNow = clipsRef.current;
-      const firstVisual = allClipsNow.find(
+      const visuals = clipsRef.current.filter(
         (c) => c.type === "image" || c.type === "video"
       );
-      if (firstVisual) {
-        setSelectedClipId((prev) => prev || firstVisual.id);
-        const maxVisualEnd = Math.max(
-          ...allClipsNow
-            .filter((c) => c.type === "video" || c.type === "image")
-            .map((c) => c.endTime)
-        );
-        setTotalDuration((prev) => Math.max(prev, maxVisualEnd || 0));
+
+      if (visuals.length) {
+        setSelectedClipId(visuals[0].id);
+        setTotalDuration(Math.max(...visuals.map((v) => v.endTime || 0)));
       }
-    }, 50);
-  };
+    }, 0);
+    console.log("IMPORTED", importedClips, importedCanvasTextBlocks);
+  }, [ClipsData]);
 
   useEffect(() => {
-    let cancelled = false;
-    // Run the builder once on mount
-    buildAndReplaceClipsFromClipsData();
+    if (!importedTextBlocks.length) return;
 
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // run once
+    importedTextBlocks.forEach((tb) => {
+      const exists = canvasStore.getBlockById?.(tb.id);
+      if (exists) return;
+
+      canvasStore.addTextBlock(tb.pageId, {
+        id: tb.id,
+        x: tb.position?.x ?? 50,
+        y: tb.position?.y ?? 50,
+        text: tb.text,
+        style: tb.style,
+        width: tb.size?.width,
+        height: tb.size?.height,
+        zIndex: tb.zIndex,
+      });
+    });
+  }, [importedTextBlocks, canvasStore]);
+
+  // async function: builds clips array from ClipsData and replaces app clips state
+  // const buildAndReplaceClipsFromClipsData = async () => {
+  //   if (!ClipsData) return;
+
+  //   // Find slides array (support both shapes)
+  //   const dataEntry =
+  //     Array.isArray(ClipsData) && ClipsData.length
+  //       ? ClipsData.find((d) => Array.isArray(d.slides)) || ClipsData[0]
+  //       : ClipsData;
+  //   if (!dataEntry) return;
+
+  //   const slides = Array.isArray(dataEntry.slides)
+  //     ? dataEntry.slides
+  //     : Array.isArray(ClipsData) &&
+  //       ClipsData.every(
+  //         (s) =>
+  //           s && (s.image || s.image_url || s.url || s.video_url || s.video)
+  //       )
+  //     ? ClipsData
+  //     : null;
+  //   if (!slides || !slides.length) return;
+
+  //   // Helper: deep clone
+  //   const deepClone = (o) => {
+  //     try {
+  //       return typeof structuredClone === "function"
+  //         ? structuredClone(o)
+  //         : JSON.parse(JSON.stringify(o));
+  //     } catch {
+  //       return JSON.parse(JSON.stringify(o));
+  //     }
+  //   };
+
+  //   // Pre-read audio durations in parallel (best-effort)
+  //   const audioDurationPromises = slides.map((s, idx) => {
+  //     const audioUrl = s?.audio?.audio_url || s?.audio_url || null;
+  //     const slideAudioDuration = s?.audio?.duration ?? null;
+  //     if (!audioUrl)
+  //       return Promise.resolve(
+  //         slideAudioDuration != null ? Number(slideAudioDuration) : null
+  //       );
+
+  //     // getRemoteMediaDuration should exist in your file (robust helper recommended)
+  //     return getRemoteMediaDuration(
+  //       audioUrl,
+  //       "audio",
+  //       slideAudioDuration || 3,
+  //       {
+  //         timeoutMs: 8000,
+  //         tryCrossOrigin: true,
+  //       }
+  //     )
+  //       .then((d) => {
+  //         if (d == null)
+  //           return slideAudioDuration != null ? Number(slideAudioDuration) : 3;
+  //         return d;
+  //       })
+  //       .catch(() =>
+  //         slideAudioDuration != null ? Number(slideAudioDuration) : 3
+  //       );
+  //   });
+
+  //   // Pre-read video durations in parallel (if needed)
+  //   const videoDurationPromises = slides.map((s) => {
+  //     const videoUrl =
+  //       (s.video && (s.video.video_url || s.video.url)) ||
+  //       s.video_url ||
+  //       s.videoUrl ||
+  //       null;
+  //     const providedDuration =
+  //       Number(
+  //         s.duration ||
+  //           (s.video && (s.video.duration || s.video.video_duration)) ||
+  //           0
+  //       ) || 0;
+  //     if (!videoUrl) return Promise.resolve(null);
+  //     if (providedDuration > 0) return Promise.resolve(providedDuration);
+  //     return getRemoteMediaDuration(videoUrl, "video", null, {
+  //       timeoutMs: 10000,
+  //       tryCrossOrigin: true,
+  //     });
+  //   });
+
+  //   const [audioDurations, videoDurations] = await Promise.all([
+  //     Promise.all(audioDurationPromises),
+  //     Promise.all(videoDurationPromises),
+  //   ]);
+
+  //   // tiny helper to test whether a URL looks like an image
+  //   const isLikelyImage = (url) => {
+  //     if (!url || typeof url !== "string") return false;
+  //     if (url.startsWith("data:image/")) return true;
+  //     return /\.(png|jpe?g|gif|webp|avif|svg)(\?.*)?$/i.test(url);
+  //   };
+
+  //   // Build clips sequentially
+  //   const newClips = [];
+  //   let visualCursor = 0;
+
+  //   for (let i = 0; i < slides.length; i++) {
+  //     const slide = slides[i];
+  //     const imageObj = slide.image || {};
+  //     const audioObj = slide.audio || {};
+  //     const videoObj = slide.video || {};
+
+  //     const videoUrl =
+  //       videoObj.video_url ||
+  //       videoObj.url ||
+  //       slide.video_url ||
+  //       slide.videoUrl ||
+  //       null;
+
+  //     const imageUrl =
+  //       imageObj.image_url ||
+  //       slide.image_url ||
+  //       slide.imageUrl ||
+  //       slide.url ||
+  //       null;
+
+  //     const isVideo = !!videoUrl;
+
+  //     // Pick visual duration
+  //     let visualDuration = 0;
+  //     if (isVideo) {
+  //       visualDuration =
+  //         Number(videoObj.duration || videoObj.video_duration) ||
+  //         Number(videoDurations[i]) ||
+  //         3;
+  //     } else {
+  //       visualDuration =
+  //         Number(
+  //           imageObj.duration || imageObj.image_duration || slide.duration
+  //         ) || 3;
+  //     }
+
+  //     const visualId =
+  //       slide.uuid ||
+  //       `visual-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  //     const visualStart = visualCursor;
+  //     const visualEnd = visualStart + visualDuration;
+
+  //     // Choose thumbnail:
+  //     // - For videos: prefer slide.video_thumbnail (your canonical field)
+  //     // - For images: use the image url (you said you don't send separate thumbnails for images)
+  //     let chosenThumbnail = null;
+  //     if (isVideo) {
+  //       chosenThumbnail =
+  //         (slide.video &&
+  //           (slide.video.video_thumbnail || slide.video.Video_thumbnail)) ||
+  //         slide.video_thumbnail ||
+  //         // optional older fallback if present:
+  //         slide.thumbnail ||
+  //         videoObj.thumbnail ||
+  //         null;
+
+  //       // Validate: if the chosen value is obviously not an image (e.g. an mp3 link),
+  //       // we don't set a thumbnail (UI will show Loading... fallback).
+  //       if (!isLikelyImage(chosenThumbnail)) {
+  //         chosenThumbnail = null;
+  //       }
+  //     } else {
+  //       chosenThumbnail = imageUrl || null; // image itself is the thumbnail
+  //     }
+
+  //     // Build clip
+  //     const visualClip = {
+  //       id: visualId,
+  //       type: isVideo ? "video" : "image",
+  //       url: isVideo ? videoUrl || "" : imageUrl || "",
+  //       fileName: isVideo
+  //         ? (videoUrl || "").split("/").pop()
+  //         : imageUrl
+  //         ? imageUrl.split("/").pop()
+  //         : `image-${visualId}`,
+  //       mimeType: isVideo
+  //         ? videoObj.mimeType || "video/mp4"
+  //         : imageUrl?.endsWith(".png")
+  //         ? "image/png"
+  //         : "image/jpeg",
+  //       duration: visualDuration,
+  //       startTime: visualStart,
+  //       endTime: visualEnd,
+  //       trimStart: 0,
+  //       trimEnd: 0,
+  //       hasAudio: !!(audioObj && audioObj.audio_url) || !!isVideo,
+  //       thumbnail: chosenThumbnail,
+  //       track: 0,
+  //       _rawSlide: deepClone(slide),
+  //     };
+
+  //     newClips.push(visualClip);
+
+  //     // Attach independent audio clip if slide provides audio_url
+  //     if (audioObj && audioObj.audio_url) {
+  //       const audioDur =
+  //         audioDurations &&
+  //         typeof audioDurations[i] !== "undefined" &&
+  //         audioDurations[i] != null
+  //           ? audioDurations[i]
+  //           : Number(audioObj.duration) || 3;
+
+  //       const audioClip = {
+  //         id: `${audioObj.uuid || visualId}-audio`,
+  //         type: "audio",
+  //         url: audioObj.audio_url,
+  //         fileName: audioObj.audio_url.split("/").pop(),
+  //         mimeType: "audio/mpeg",
+  //         duration: audioDur,
+  //         startTime: visualStart,
+  //         endTime: visualStart + audioDur,
+  //         trimStart: 0,
+  //         trimEnd: 0,
+  //         hasAudio: true,
+  //         thumbnail: null,
+  //         track: 0,
+  //       };
+
+  //       newClips.push(audioClip);
+  //     }
+
+  //     visualCursor = visualEnd;
+  //   } // end for
+
+  //   if (!newClips.length) return;
+
+  //   // replace app clips state (assumes setClips + fixAudioTrackLayers exist in your file)
+  //   setClips(() => {
+  //     const marked = newClips.map((c) => ({ ...c, externalSource: true }));
+  //     return assignTracks(marked);
+  //   });
+
+  //   // ensure selection and totalDuration update after setClips
+  //   setTimeout(() => {
+  //     const allClipsNow = clipsRef.current;
+  //     const firstVisual = allClipsNow.find(
+  //       (c) => c.type === "image" || c.type === "video"
+  //     );
+  //     if (firstVisual) {
+  //       setSelectedClipId((prev) => prev || firstVisual.id);
+  //       const maxVisualEnd = Math.max(
+  //         ...allClipsNow
+  //           .filter((c) => c.type === "video" || c.type === "image")
+  //           .map((c) => c.endTime)
+  //       );
+  //       setTotalDuration((prev) => Math.max(prev, maxVisualEnd || 0));
+  //     }
+  //   }, 50);
+  // };
+
+  // useEffect(() => {
+  //   let cancelled = false;
+  //   // Run the builder once on mount
+  //   buildAndReplaceClipsFromClipsData();
+
+  //   return () => {
+  //     cancelled = true;
+  //   };
+  //   // eslint-disable-next-line react-hooks/exhaustive-deps
+  // }, []); // run once
 
   // -----------------------
   // end adapter
@@ -1531,7 +1620,7 @@ function RealEditor({ ClipsData }) {
           blockId: block.id,
           type: "text",
 
-          // ⏱ timeline fields
+          // timeline fields
           startTime,
           endTime,
           duration,
@@ -1650,13 +1739,13 @@ function RealEditor({ ClipsData }) {
 
   const textBlockMap = new Map();
 
-  canvasStore.project.pages.forEach((page) => {
-    page.blocks?.forEach((block) => {
+  for (const page of canvasStore.project.pages) {
+    for (const block of page.blocks ?? []) {
       if (block.type === "text") {
         textBlockMap.set(block.id, block);
       }
-    });
-  });
+    }
+  }
 
   return (
     <div className=" bg-white text-gray-900 font-sans w-full flex flex-col items-center justify-center">
@@ -1877,6 +1966,6 @@ function RealEditor({ ClipsData }) {
       </div>
     </div>
   );
-}
+});
 
 export default observer(RealEditor);

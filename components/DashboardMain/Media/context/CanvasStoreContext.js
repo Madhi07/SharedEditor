@@ -78,56 +78,80 @@ export function CanvasStoreProvider({
       return { width: 1000, height: 1000 };
     })();
 
-    // Build initial project object (do NOT create or inject project.id)
-    // Priority: initialProject > constructed object from projectId/pageId/editor
-    const project = initialProject
-      ? // shallow clone; createCanvasStore will deep-clone internally where needed
-        { ...initialProject }
-      : {
-          ...(projectId ? { id: projectId } : {}),
-          ...(editor ? { editor } : {}),
-          pages: pageId
-            ? [
-                {
-                  id: pageId,
-                  name: "Page",
-                  blocks: [],
-                  meta: {
-                    logicalSize: defaultLogicalForEditor,
-                    // aspect shorthand (kept for compatibility)
-                    aspect:
-                      defaultLogicalForEditor &&
-                      defaultLogicalForEditor.width &&
-                      defaultLogicalForEditor.height
-                        ? {
-                            w: defaultLogicalForEditor.width,
-                            h: defaultLogicalForEditor.height,
-                          }
-                        : undefined,
-                  },
+    function normalizeProject(project, editor, pageId) {
+      const defaultLogical =
+        editor === "video"
+          ? { width: 720, height: 358 }
+          : editor === "Reels"
+          ? { width: 1080, height: 1920 }
+          : { width: 1000, height: 1000 };
+
+      // CASE 1: null / undefined / empty object
+      if (!project || Object.keys(project).length === 0) {
+        return {
+          editor,
+          pages: [
+            {
+              id: pageId || "video-page",
+              name: "Page",
+              blocks: [],
+              meta: {
+                logicalSize: defaultLogical,
+                aspect: {
+                  w: defaultLogical.width,
+                  h: defaultLogical.height,
                 },
-              ]
-            : [
-                {
-                  id: pageId ?? "page-1",
-                  name: "Page",
-                  blocks: [],
-                  meta: {
-                    logicalSize: defaultLogicalForEditor,
-                    aspect:
-                      defaultLogicalForEditor &&
-                      defaultLogicalForEditor.width &&
-                      defaultLogicalForEditor.height
-                        ? {
-                            w: defaultLogicalForEditor.width,
-                            h: defaultLogicalForEditor.height,
-                          }
-                        : undefined,
-                  },
-                },
-              ],
-          activePageId: pageId ?? undefined,
+              },
+            },
+          ],
+          activePageId: pageId || "video-page",
         };
+      }
+
+      // ✅ CASE 2: project exists (with or without pages)
+      const pages =
+        project.pages?.length > 0
+          ? project.pages.map((p) => ({
+              ...p,
+              blocks: p.blocks || [],
+              meta: {
+                ...p.meta,
+                logicalSize: p.meta?.logicalSize ?? defaultLogical,
+                aspect: p.meta?.aspect ?? {
+                  w: defaultLogical.width,
+                  h: defaultLogical.height,
+                },
+              },
+            }))
+          : [
+              {
+                id: pageId || "video-page",
+                name: "Page",
+                blocks: [],
+                meta: {
+                  logicalSize: defaultLogical,
+                  aspect: {
+                    w: defaultLogical.width,
+                    h: defaultLogical.height,
+                  },
+                },
+              },
+            ];
+
+      return {
+        ...project,
+        editor: project.editor || editor,
+        pages,
+        activePageId:
+          project.activePageId ?? pages[0]?.id ?? pageId ?? "video-page",
+      };
+    }
+
+    console.log("InitialProject", initialProject);
+    // Priority: initialProject > constructed object from projectId/pageId/editor
+    const project = normalizeProject(initialProject, editor, pageId);
+
+    console.log("project", project)
 
     // create the store with the exact project object provided (no id injection here)
     const s = createCanvasStore({ project });

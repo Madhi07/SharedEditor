@@ -167,7 +167,7 @@ export function createCanvasStore(initial = {}) {
       globalStack.undoStack.length = 0;
       globalStack.redoStack.length = 0;
     },
-
+    
     setActivePage(pageId) {
       if (!pageId) return;
       const found = store.project?.pages?.some((p) => p.id === pageId);

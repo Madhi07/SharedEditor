@@ -67,27 +67,83 @@ export default function Timeline({
   };
 
   const ROW_GAP = 12;
-  const VISUAL_TRACK_TOP = 20;
+  const VISUAL_TRACK_TOP = 0;
+  const TIMELINE_VIEWPORT_HEIGHT = 220;
+  const { min: minTrack, max: maxTrack } = getTrackBounds(clips);
+
+  // Only center when we have tracks on BOTH sides
+  const shouldCenter = minTrack < 0 && maxTrack > 0;
+
+  const VIEWPORT_CENTER_OFFSET = shouldCenter
+    ? TIMELINE_VIEWPORT_HEIGHT / 2
+    : 0;
 
   function trackToTop(track) {
-    if (track === -1) {
-      return VISUAL_TRACK_TOP;
-    }
+    const base = VISUAL_TRACK_TOP + TRACK_HEIGHTS[-1] + ROW_GAP;
+
+    const centeredBase = base + VIEWPORT_CENTER_OFFSET - TRACK_HEIGHTS[0] / 2;
+
+    let top;
 
     if (track === 0) {
-      return VISUAL_TRACK_TOP + TRACK_HEIGHTS[-1] + ROW_GAP;
+      top = centeredBase;
+    } else if (track < 0) {
+      top = centeredBase - Math.abs(track) * (TRACK_HEIGHTS[-1] + ROW_GAP);
+    } else {
+      top =
+        centeredBase +
+        TRACK_HEIGHTS[0] +
+        ROW_GAP +
+        (track - 1) * (TRACK_HEIGHTS.audio + ROW_GAP);
     }
 
-    // audio tracks (1, 2, 3…)
+    // Clamp so we never leave empty space above
+    return Math.max(VISUAL_TRACK_TOP, top);
+  }
+  function getTrackBounds(clips) {
+    let min = 0;
+    let max = 0;
+
+    clips.forEach((c) => {
+      if (typeof c.track === "number") {
+        min = Math.min(min, c.track);
+        max = Math.max(max, c.track);
+      }
+    });
+
+    return { min, max };
+  }
+
+  const computeTimelineHeight = (clips) => {
+    if (!clips.length) return 220;
+
+    let minTrack = 0;
+    let maxTrack = 0;
+
+    clips.forEach((c) => {
+      if (typeof c.track === "number") {
+        minTrack = Math.min(minTrack, c.track);
+        maxTrack = Math.max(maxTrack, c.track);
+      }
+    });
+
+    const textRows = Math.abs(minTrack); // negative tracks
+    const audioRows = Math.max(0, maxTrack); // positive tracks
+
     return (
       VISUAL_TRACK_TOP +
+      textRows * (TRACK_HEIGHTS[-1] + ROW_GAP) +
       TRACK_HEIGHTS[-1] +
       ROW_GAP +
       TRACK_HEIGHTS[0] +
       ROW_GAP +
-      (track - 1) * (TRACK_HEIGHTS.audio + ROW_GAP)
+      audioRows * (TRACK_HEIGHTS.audio + ROW_GAP) +
+      40 // bottom padding
     );
-  }
+  };
+
+  const timelineHeight = computeTimelineHeight(clips);
+  console.log(timelineHeight)
 
   useEffect(() => {
     function setContainerScroll(v) {
@@ -798,12 +854,15 @@ export default function Timeline({
       {/* Main timeline with single scrollbar */}
       <div
         className="relative overflow-x-auto timeline-container cursor-pointer bg-gray-50"
-        style={{ minHeight: "220px" }}
+        style={{ height: `${TIMELINE_VIEWPORT_HEIGHT}px` }}
       >
         <div
           ref={timelineRef}
           className="relative px-4 py-4"
-          style={{ width: `${timelineWidth}px`, minHeight: "160px" }}
+          style={{
+            width: `${timelineWidth}px`,
+            height: `${timelineHeight}px`, // 👈 content height
+          }}
           onClick={handleTimelineClick}
         >
           {/* Playhead */}
@@ -905,7 +964,7 @@ export default function Timeline({
                 ? "bg-blue-500"
                 : clip.type === "audio"
                 ? "bg-blue-400"
-                : "bg-purple-500";
+                : "bg-white";
             const thumb = clip.thumbnail;
             const thumbIsImage =
               !!thumb &&
@@ -979,7 +1038,7 @@ export default function Timeline({
                               : block?.style?.strike
                               ? "line-through"
                               : "none",
-                            color: block?.style?.color || "#ffffff",
+                            color: block?.style?.color || "#000",
                             textAlign: block?.textAlign || "center",
                             whiteSpace: "pre-wrap",
                             wordBreak: "break-word",

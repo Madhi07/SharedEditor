@@ -1,10 +1,10 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useState, useRef } from "react";
 import RealEditor from "../../ReelsEditor";
 import { FaArrowLeft, FaDownload, FaSync } from "react-icons/fa";
 import { LuLoaderCircle } from "react-icons/lu";
 import { MdDownload } from "react-icons/md";
 import { CanvasStoreProvider } from "../../context/CanvasStoreContext";
-
+import mediaEditData from "../../constant/sampleJson";
 import InstagramReelPostModal from "../../Modal/InstagramReelPostModal";
 
 export default function Step3ComposeVideo({
@@ -23,6 +23,7 @@ export default function Step3ComposeVideo({
 }) {
   const [showEditor, setShowEditor] = useState(!mediaData?.video_url);
   const [showPostModal, setShowPostModal] = useState(false);
+  const editorRef = useRef(null);
 
   useEffect(() => {
     return () => {
@@ -34,6 +35,8 @@ export default function Step3ComposeVideo({
   const handleEditClick = () => {
     setShowEditor(true);
   };
+
+  console.log("mediaData",mediaData)
 
   return (
     <Fragment>
@@ -82,6 +85,21 @@ export default function Step3ComposeVideo({
                       </div>
 
                       <button
+                        onClick={async () => {
+                          try {
+                            await editorRef.current?.save();
+                            alert("Saved successfully");
+                          } catch (e) {
+                            console.error(e);
+                            alert("Save failed");
+                          }
+                        }}
+                        className="px-4 py-2 bg-gradient-to-r from-[#6e3aff] to-[#ff3a8c] text-white rounded-lg shadow"
+                      >
+                        Save
+                      </button>
+
+                      <button
                         onClick={() => setShowPostModal(true)}
                         className="px-4 py-2 bg-gradient-to-r from-[#ff3a8c] to-[#6e3aff] text-white rounded-lg shadow"
                       >
@@ -91,9 +109,9 @@ export default function Step3ComposeVideo({
                   )}
                 </div>
               </div>
-              <CanvasStoreProvider  pageId="video-page" editor="video">
-                <RealEditor ClipsData={mediaData} />
-              </CanvasStoreProvider>
+              <CanvasStoreProvider initialProject={mediaData?.canvas_data ?? {}}  pageId={mediaData.canvas_data?.activePageId || "video-page"} editor={mediaData.canvas_data?.editor || "video"}>
+                <RealEditor ref={editorRef} ClipsData={mediaData} />
+              </CanvasStoreProvider>  
             </div>
           </div>
         </Fragment>
