@@ -13,6 +13,7 @@ import BlockRenderer from "./BlockRenderer";
 import { useCanvasStore } from "../context/CanvasStoreContext";
 import SelectionOverlay from "../SharedComponent/SelectionOverlay";
 import { forwardRef } from "react";
+import { computeMediaFit } from "../utils/canvasUtils/canvasConfig";
 import HelperToolbar from "../SharedComponent/HelperToolbar";
 import { useImperativeHandle } from "react";
 import {
@@ -359,70 +360,56 @@ const VideoPlayer = forwardRef(function VideoPlayer(
       ? duration // snap to full duration (0:11)
       : currentTime;
 
-  // const [fit, setFit] = useState({
-  //   sx: 1,
-  //   sy: 1,
-  //   logicalSize: { width: 1, height: 1 },
-  //   canvasSize: { width: 1, height: 1 },
-  // });
+  const [fit, setFit] = useState({
+    sx: 1,
+    sy: 1,
+    logicalSize: { width: 1, height: 1 },
+    canvasSize: { width: 1, height: 1 },
+  });
 
-  // const [, setTick] = useState(0);
+  const [, setTick] = useState(0);
 
-  // useEffect(() => {
-  //   if (!store || typeof store.subscribe !== "function") return;
-  //   const unsub = store.subscribe(() => setTick((t) => t + 1));
-  //   return unsub;
-  // }, [store]);
+  useEffect(() => {
+    if (!store || typeof store.subscribe !== "function") return;
+    const unsub = store.subscribe(() => setTick((t) => t + 1));
+    return unsub;
+  }, [store]);
 
-  // useEffect(() => {
-  //   if (!overlayRef.current || !store) return;
+  useEffect(() => {
+    if (!stageContainerRef.current || !store) return;
 
-  //   function recomputeFit() {
-  //     const rect = overlayRef.current.getBoundingClientRect();
-  //     if (!rect) return;
+    function recomputeFit() {
+      const rect = stageContainerRef.current.getBoundingClientRect();
 
-  //     const logical = store.getPageLogicalSize?.(pageId) ??
-  //       store.project?.pages?.find((p) => p.id === pageId)?.meta
-  //         ?.logicalSize ?? { width: 1920, height: 1080 }; // final fallback
+      console.log("RECT BEFORE GUARD", rect);
+      if (!rect || rect.width === 0 || rect.height === 0) return;
 
-  //     const fitObj = computeMediaFit(
-  //       { left: 0, top: 0, width: rect.width, height: rect.height },
-  //       logical,
-  //       "contain"
-  //     );
+      const logical = store.getPageLogicalSize?.(pageId) ??
+        store.project?.pages?.find((p) => p.id === pageId)?.meta
+          ?.logicalSize ?? { width: 1920, height: 1080 }; // final fallback
 
-  //     setFit({
-  //       sx: fitObj.scaleX,
-  //       sy: fitObj.scaleY,
-  //       logicalSize: logical,
-  //       canvasSize: { width: rect.width, height: rect.height },
-  //     });
-  //   }
+      const fitObj = computeMediaFit(
+        { width: rect.width, height: rect.height },
+        logical,
+        "contain"
+      );
 
-  //   recomputeFit();
-  //   window.addEventListener("resize", recomputeFit);
-  //   return () => window.removeEventListener("resize", recomputeFit);
-  // }, [store, pageId]);
+      // ✅ STORE THE FULL FIT
+      setFit(fitObj);
+    }
+
+    recomputeFit();
+
+    window.addEventListener("resize", recomputeFit);
+    return () => window.removeEventListener("resize", recomputeFit);
+  }, [store, pageId]);
 
   const logical = store.getPageLogicalSize?.(pageId) ?? {
     width: 1,
     height: 1,
   };
 
-  const getFit = useCallback(() => {
-    return {
-      sx: 1,
-      sy: 1,
-      renderWidth: logical.width,
-      renderHeight: logical.height,
-      offsetX: 0,
-      offsetY: 0,
-      logicalSize: {
-        width: logical.width,
-        height: logical.height,
-      },
-    };
-  }, [logical.width, logical.height]);
+  const getFit = useCallback(() => fit, [fit]);
 
   useImperativeHandle(containerRef, () => ({
     getCanvasEl: () => overlayRef.current,
@@ -520,26 +507,26 @@ const VideoPlayer = forwardRef(function VideoPlayer(
       // placeholder if you want VideoPlayer to open edit UI
     }
   };
-  useLayoutEffect(() => {
-    if (!stageContainerRef.current) return;
+  // useLayoutEffect(() => {
+  //   if (!stageContainerRef.current) return;
 
-    const rect = stageContainerRef.current.getBoundingClientRect();
-    const logicalSize = store.getPageLogicalSize?.(pageId);
+  //   const rect = stageContainerRef.current.getBoundingClientRect();
+  //   const logicalSize = store.getPageLogicalSize?.(pageId);
 
-    if (!logicalSize) return;
+  //   if (!logicalSize) return;
 
-    const scaleX = rect.width / logicalSize.width;
-    const scaleY = rect.height / logicalSize.height;
+  //   const scaleX = rect.width / logicalSize.width;
+  //   const scaleY = rect.height / logicalSize.height;
 
-    console.group("CANVAS SCALE DEBUG");
-    console.log("DOM width  :", rect.width);
-    console.log("DOM height :", rect.height);
-    console.log("Logical width :", logicalSize.width);
-    console.log("Logical height:", logicalSize.height);
-    console.log("Scale X:", scaleX);
-    console.log("Scale Y:", scaleY);
-    console.groupEnd();
-  }, [store, pageId, zoom]);
+  //   console.group("CANVAS SCALE DEBUG");
+  //   console.log("DOM width  :", rect.width);
+  //   console.log("DOM height :", rect.height);
+  //   console.log("Logical width :", logicalSize.width);
+  //   console.log("Logical height:", logicalSize.height);
+  //   console.log("Scale X:", scaleX);
+  //   console.log("Scale Y:", scaleY);
+  //   console.groupEnd();
+  // }, [store, pageId, zoom]);
 
   return (
     <div
@@ -551,14 +538,18 @@ const VideoPlayer = forwardRef(function VideoPlayer(
         ref={stageContainerRef}
         style={{
           position: "relative",
-          width: logical.width,
-          height: logical.height,
-          background: "black",
+          background: "white",
+          width: "100%",
+          aspectRatio: `${logical.width} / ${logical.height}`,
           overflow: "hidden",
+          pointerEvents: "none",
         }}
-        className=" rounded-lg mb-2 flex items-center justify-center"
+        className="rounded-lg mb-2 flex items-center justify-center"
       >
-        <div className="w-full h-full flex items-center justify-center">
+        <div
+          style={{ width: fit.renderWidth,  height: fit.renderHeight, }}
+          className="flex items-center justify-center"
+        >
           {/* Keep video element mounted for Video.js stability */}
           <video
             ref={videoRef}
@@ -573,7 +564,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
               src={currentClip.url}
               alt={currentClip.fileName || "image"}
               className="absolute inset-0 w-full h-full object-contain z-10 transition-opacity duration-500"
-              style={{ backgroundColor: "black" }}
+              // style={{ backgroundColor: "black" }}
             />
           )}
           {/* ------------------------------------------------------------- */}
@@ -583,8 +574,13 @@ const VideoPlayer = forwardRef(function VideoPlayer(
             ref={stageRef}
             style={{
               position: "absolute",
-              inset: 0,
+              left: fit.offsetX,
+              top: fit.offsetY,
+              width: fit.renderWidth,
+              height: fit.renderHeight,
+              zIndex: 50,
               pointerEvents: "auto",
+               overflow: "hidden"
             }}
           >
             {/* THIS is the real canvas */}

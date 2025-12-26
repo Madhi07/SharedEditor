@@ -159,10 +159,28 @@ export default function useCanvasInteraction({ store, pageId }) {
 
       /* ---------- COMMIT MOVE ---------- */
       if (i.type === "move") {
+        const logical = store.getPageLogicalSize?.(pageId) ?? {
+          width: 1,
+          height: 1,
+        };
+
+        const block = store.getBlockById(i.blockId);
+        if (!block) return;
+
+        let nextX = i.startCenter.x + dx;
+        let nextY = i.startCenter.y + dy;
+
+        //  CLAMP TO LOGICAL CANVAS
+        nextX = Math.max(0, Math.min(nextX, logical.width - block.size.width));
+        nextY = Math.max(
+          0,
+          Math.min(nextY, logical.height - block.size.height)
+        );
+
         store.updateBlock(i.blockId, {
           position: {
-            x: i.startCenter.x + dx,
-            y: i.startCenter.y + dy,
+            x: nextX,
+            y: nextY,
           },
         });
       }

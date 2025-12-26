@@ -193,30 +193,56 @@ export const buildBlockStyle = (block) => {
   return style;
 };
 
+export function computeMediaFit(
+  containerRect,
+  logical,
+  mode = "contain" // future-proof
+) {
+  // ---------- SAFETY ----------
+  const cw = Math.max(1, containerRect?.width || 0);
+  const ch = Math.max(1, containerRect?.height || 0);
 
-export function computeMediaFit(containerRect) {
-  const LOGICAL_W = 720;
-  const LOGICAL_H = 358;
+  const lw = Math.max(1, logical?.width || 0);
+  const lh = Math.max(1, logical?.height || 0);
 
-  const scale = Math.min(
-    containerRect.width / LOGICAL_W,
-    containerRect.height / LOGICAL_H
-  );
+  // ---------- SCALE ----------
+  let scale;
+  if (mode === "cover") {
+    scale = Math.max(cw / lw, ch / lh);
+  } else {
+    // default: contain
+    scale = Math.min(cw / lw, ch / lh);
+  }
 
-  const renderWidth = LOGICAL_W * scale;
-  const renderHeight = LOGICAL_H * scale;
+  // ---------- RENDER SIZE ----------
+  const renderWidth = lw * scale;
+  const renderHeight = lh * scale;
+
+  // ---------- CENTERING ----------
+  const offsetX = (cw - renderWidth) / 2;
+  const offsetY = (ch - renderHeight) / 2;
 
   return {
+    // canonical scale
+    scale,
+
+    // compatibility aliases
     sx: scale,
     sy: scale,
+
+    // sizes
     renderWidth,
     renderHeight,
-    offsetX: (containerRect.width - renderWidth) / 2,
-    offsetY: (containerRect.height - renderHeight) / 2,
+
+    // offsets
+    offsetX,
+    offsetY,
+
+    // echo sizes for downstream math
+    logicalSize: { width: lw, height: lh },
+    canvasSize: { width: cw, height: ch },
   };
 }
-
-
 
 /**
  * Convert client pointer → canvas space

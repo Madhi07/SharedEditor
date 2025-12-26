@@ -61,13 +61,14 @@ export function CanvasStoreProvider({
 
       return s;
     }
+    
 
     // Defaults per editor: change here to tune logical canvas sizes
     const defaultLogicalForEditor = (() => {
-      if (editor === "video") {
-        return { width: 720, height: 358 }; // FIXED size
+      if (editor === "YouTube") {
+        return { width: 1920, height: 1080 }; 
       }
-      if (editor === "Reels") {
+      if (editor === "Instagram Reels") {
         return { width: 1080, height: 1920 };
       }
       if (editor === "infographics") {
@@ -80,9 +81,9 @@ export function CanvasStoreProvider({
 
     function normalizeProject(project, editor, pageId) {
       const defaultLogical =
-        editor === "video"
-          ? { width: 720, height: 358 }
-          : editor === "Reels"
+        editor === "YouTube"
+          ? { width: 1920, height: 1080 }
+          : editor === "Instagram Reels"
           ? { width: 1080, height: 1920 }
           : { width: 1000, height: 1000 };
 
@@ -152,6 +153,7 @@ export function CanvasStoreProvider({
     const project = normalizeProject(initialProject, editor, pageId);
 
     console.log("project", project)
+
 
     // create the store with the exact project object provided (no id injection here)
     const s = createCanvasStore({ project });

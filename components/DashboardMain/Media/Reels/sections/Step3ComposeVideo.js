@@ -109,7 +109,7 @@ export default function Step3ComposeVideo({
                   )}
                 </div>
               </div>
-              <CanvasStoreProvider initialProject={mediaData?.canvas_data ?? {}}  pageId={mediaData.canvas_data?.activePageId || "video-page"} editor={mediaData.canvas_data?.editor || "video"}>
+              <CanvasStoreProvider initialProject={mediaData?.canvas_data ?? {}}  pageId={mediaData.canvas_data?.activePageId || "video-page"} editor={mediaData.platform?.name || "YouTube"}>
                 <RealEditor ref={editorRef} ClipsData={mediaData} />
               </CanvasStoreProvider>  
             </div>

@@ -1240,7 +1240,7 @@ const RealEditor = forwardRef(function RealEditor({ ClipsData }, ref) {
     const USE_NEW_ADAPTER = true;
     if (!USE_NEW_ADAPTER) return;
 
-    console.log("🔄 Importing timeline from mediaData adapter");
+    console.log(" Importing timeline from mediaData adapter");
 
     const { clips: importedClips, textBlocks: importedCanvasTextBlocks } =
       importTimelineClipsFromMediaData(ClipsData);
@@ -1250,7 +1250,7 @@ const RealEditor = forwardRef(function RealEditor({ ClipsData }, ref) {
     setImportedTextBlocks(importedCanvasTextBlocks || []);
 
     if (!importedClips.length) {
-      console.warn("⚠️ Adapter returned no clips");
+      console.warn(" Adapter returned no clips");
       return;
     }
 
