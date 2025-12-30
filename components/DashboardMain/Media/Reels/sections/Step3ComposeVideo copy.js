@@ -92,7 +92,7 @@ export default function Step3ComposeVideo({
                       <span className="text-gray-500">#{idx + 1}</span> {s.subtitle}
                     </div>
                     <div className="text-xs text-gray-500 mt-1 line-clamp-2">
-                      {s.explain_text}
+                      {s.audio.audio_prompt}
                     </div>
                   </div>
 

@@ -39,7 +39,7 @@ export default function Step1PromptSetup({
                 <h3 className="font-bold text-xl text-gray-900">
                   Slide {s.slide_number}: {s.subtitle}
                 </h3>
-                <p className="text-sm text-gray-500 mt-1">{s.explain_text}</p>
+                <p className="text-sm text-gray-500 mt-1">{s.audio.audio_prompt}</p>
               </div>
               <div className="flex gap-2 ml-4">
                 {!editing ? (

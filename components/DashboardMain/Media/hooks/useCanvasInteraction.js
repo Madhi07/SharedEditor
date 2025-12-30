@@ -1,7 +1,7 @@
 import { useRef, useCallback, useEffect } from "react";
 import { runInAction } from "mobx";
 
-export default function useCanvasInteraction({ store, pageId }) {
+export default function useCanvasInteraction({ store, pageId, getFit }) {
   const interactionRef = useRef(null);
   const rafRef = useRef(null);
 
@@ -22,7 +22,7 @@ export default function useCanvasInteraction({ store, pageId }) {
         const el = store.blockRefs?.[pageId]?.[i.blockId];
         if (!el) return;
 
-        /* ================= MOVE ================= */
+        /* ================= MOVE (DOM ONLY) ================= */
         if (i.type === "move") {
           el.style.setProperty("--drag-x", `${dx}px`);
           el.style.setProperty("--drag-y", `${dy}px`);
@@ -157,7 +157,12 @@ export default function useCanvasInteraction({ store, pageId }) {
         el.style.removeProperty("--rotate");
       }
 
-      /* ---------- COMMIT MOVE ---------- */
+      /* ---------- SAFE SCALE ---------- */
+      const fit = getFit?.();
+      const scale =
+        fit && Number.isFinite(fit.scale) && fit.scale > 0 ? fit.scale : 1;
+
+      /* ---------- COMMIT MOVE (CENTER-BASED) ---------- */
       if (i.type === "move") {
         const logical = store.getPageLogicalSize?.(pageId) ?? {
           width: 1,
@@ -167,21 +172,40 @@ export default function useCanvasInteraction({ store, pageId }) {
         const block = store.getBlockById(i.blockId);
         if (!block) return;
 
-        let nextX = i.startCenter.x + dx;
-        let nextY = i.startCenter.y + dy;
+        const logicalDx = dx / scale;
+        const logicalDy = dy / scale;
 
-        //  CLAMP TO LOGICAL CANVAS
-        nextX = Math.max(0, Math.min(nextX, logical.width - block.size.width));
+        let nextX = i.startCenter.x + logicalDx;
+        let nextY = i.startCenter.y + logicalDy;
+
+        // ================= VIEWPORT-AWARE CLAMP (FIX) =================
+
+        // visible logical viewport size
+        const visibleLogicalWidth = fit.renderWidth / fit.scale;
+        const visibleLogicalHeight = fit.renderHeight / fit.scale;
+
+        // viewport origin in logical space (centered)
+        const viewportMinX = (logical.width - visibleLogicalWidth) / 2;
+        const viewportMinY = (logical.height - visibleLogicalHeight) / 2;
+
+        const viewportMaxX = viewportMinX + visibleLogicalWidth;
+        const viewportMaxY = viewportMinY + visibleLogicalHeight;
+
+        const halfW = block.size.width / 2;
+        const halfH = block.size.height / 2;
+
+        nextX = Math.max(
+          viewportMinX + halfW,
+          Math.min(nextX, viewportMaxX - halfW)
+        );
+
         nextY = Math.max(
-          0,
-          Math.min(nextY, logical.height - block.size.height)
+          viewportMinY + halfH,
+          Math.min(nextY, viewportMaxY - halfH)
         );
 
         store.updateBlock(i.blockId, {
-          position: {
-            x: nextX,
-            y: nextY,
-          },
+          position: { x: nextX, y: nextY },
         });
       }
 
@@ -192,20 +216,20 @@ export default function useCanvasInteraction({ store, pageId }) {
         if (isText && i.textResizeMode === "width") {
           store.updateBlock(i.blockId, {
             size: {
-              width: Math.max(50, i.startSize.width + dx),
+              width: Math.max(50, i.startSize.width + dx / scale),
               height: i.startSize.height,
             },
           });
         } else if (isText && i.textResizeMode === "scale") {
-          const scale = Math.max(0.5, 1 - dx / 200);
+          const s = Math.max(0.5, 1 - dx / 200);
           store.updateBlock(i.blockId, {
             size: {
-              width: i.startSize.width * scale,
-              height: i.startSize.height * scale,
+              width: i.startSize.width * s,
+              height: i.startSize.height * s,
             },
             style: {
               ...i.startStyle,
-              fontSize: i.startFontSize * scale,
+              fontSize: i.startFontSize * s,
             },
           });
         } else {
@@ -214,15 +238,15 @@ export default function useCanvasInteraction({ store, pageId }) {
           let cx = i.startCenter.x;
           let cy = i.startCenter.y;
 
-          if (i.handle.includes("right")) w += dx;
+          if (i.handle.includes("right")) w += dx / scale;
           if (i.handle.includes("left")) {
-            w -= dx;
-            cx += dx / 2;
+            w -= dx / scale;
+            cx += dx / (2 * scale);
           }
-          if (i.handle.includes("bottom")) h += dy;
+          if (i.handle.includes("bottom")) h += dy / scale;
           if (i.handle.includes("top")) {
-            h -= dy;
-            cy += dy / 2;
+            h -= dy / scale;
+            cy += dy / (2 * scale);
           }
 
           store.updateBlock(i.blockId, {
@@ -230,6 +254,12 @@ export default function useCanvasInteraction({ store, pageId }) {
             position: { x: cx, y: cy },
           });
         }
+
+        // 🔒 critical: reset leftover offsets
+        runInAction(() => {
+          store.dragState.x = 0;
+          store.dragState.y = 0;
+        });
       }
 
       /* ---------- COMMIT ROTATE ---------- */
@@ -240,7 +270,7 @@ export default function useCanvasInteraction({ store, pageId }) {
         });
       }
 
-      /* ---------- FINAL RESET (ACTION) ---------- */
+      /* ---------- FINAL RESET ---------- */
       runInAction(() => {
         store.dragState.active = false;
         store.dragState.rotation = null;
@@ -255,7 +285,7 @@ export default function useCanvasInteraction({ store, pageId }) {
       document.removeEventListener("pointerup", endInteraction);
       interactionRef.current = null;
     },
-    [store, pageId, onPointerMove]
+    [store, pageId, getFit, onPointerMove]
   );
 
   /* ================= START ================= */
@@ -271,14 +301,14 @@ export default function useCanvasInteraction({ store, pageId }) {
         store.isDragging = true;
       });
 
-      const interaction = {
+      interactionRef.current = {
         type,
         blockId,
         handle,
         textResizeMode,
         blockType: block.type,
         startPointer: { x: e.clientX, y: e.clientY },
-        startCenter: { ...block.position },
+        startCenter: { ...block.position }, // CENTER coords
         startSize: { ...block.size },
         startFontSize: block.style?.fontSize ?? 18,
         startStyle: { ...block.style },
@@ -291,12 +321,15 @@ export default function useCanvasInteraction({ store, pageId }) {
         const cx = rect.left + rect.width / 2;
         const cy = rect.top + rect.height / 2;
 
-        interaction.startRotation = block.rotation ?? 0;
-        interaction.center = { x: cx, y: cy };
-        interaction.startAngle = getAngle(cx, cy, e.clientX, e.clientY);
+        interactionRef.current.startRotation = block.rotation ?? 0;
+        interactionRef.current.center = { x: cx, y: cy };
+        interactionRef.current.startAngle = getAngle(
+          cx,
+          cy,
+          e.clientX,
+          e.clientY
+        );
       }
-
-      interactionRef.current = interaction;
 
       document.addEventListener("pointermove", onPointerMove);
       document.addEventListener("pointerup", endInteraction);

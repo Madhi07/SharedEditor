@@ -282,10 +282,10 @@ export default function Step2GenerateAssets({
               className="border border-gray-200 rounded-2xl p-5 bg-white shadow-lg grid grid-cols-4 gap-6 items-center hover:shadow-xl transition"
             >
               {/* --- Left Column: Info --- */}
-              {/* ... (existing code: subtitle, explain_text, slide_number, duration input) ... */}
+              {/* ... (existing code: subtitle, audio_prompt, slide_number, duration input) ... */}
               <div className="col-span-1">
                 <h4 className="font-bold text-lg">{s.subtitle}</h4>
-                <p className="text-xs text-gray-500 mt-1">{s.explain_text}</p>
+                <p className="text-xs text-gray-500 mt-1">{s.audio.audio_prompt}</p>
                 <div className="mt-4 text-xs font-semibold text-gray-700">
                   Slide {s.slide_number}
                 </div>

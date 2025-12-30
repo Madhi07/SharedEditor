@@ -267,7 +267,7 @@ const SelectionToolbar = ({
                 >
                   {/* optional placeholder */}
                   <option value="">Size</option>
-                  {Array.from({ length: 68 / 2 + 1 }, (_, i) => 4 + i * 2).map(
+                  {Array.from({ length: 120 / 2 + 1 }, (_, i) => 4 + i * 2).map(
                     (size) => (
                       <option key={size} value={size}>
                         {size}px

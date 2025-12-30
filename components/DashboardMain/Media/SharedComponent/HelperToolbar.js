@@ -43,9 +43,9 @@ function HelperToolbar() {
 
       {!locked && (
         <>
-          <button onClick={() => editorActions.duplicateSelection(store)}>
+          {/* <button onClick={() => editorActions.duplicateSelection(store)}>
             <img src="/icons/duplicate.png" className="h-4 w-4" />
-          </button>
+          </button> */}
 
           <button onClick={() => editorActions.deleteSelection(store)}>
             <img src="/icons/bin.png" className="h-4 w-4" />

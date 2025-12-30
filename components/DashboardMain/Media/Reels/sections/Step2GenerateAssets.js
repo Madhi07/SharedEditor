@@ -316,7 +316,7 @@ export default function Step2GenerateAssets({
                     </label>
                     <textarea
                       id={`caption-text-${s.id}`}
-                      value={s.caption_text || s.explain_text || ""}
+                      value={s.caption_text || s.audio.audio_prompt || ""}
                       onChange={(e) => handleCaptionChange(s.id, 'caption_text', e.target.value)}
                       rows="3"
                       placeholder="Enter overlay text for the slide..."

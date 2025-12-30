@@ -9,7 +9,7 @@ import { observer } from "mobx-react-lite";
 import { buildBlockStyle } from "../utils/canvasUtils/canvasConfig";
 import { useCanvasStore } from "../context/CanvasStoreContext";
 
-function BlockRenderer({ block, pageId, onSelect }) {
+function BlockRenderer({ block, pageId, onSelect, getFit }) {
   const store = useCanvasStore();
   const blockRef = useRef(null);
   const textBeforeEditRef = useRef("");
@@ -96,14 +96,13 @@ function BlockRenderer({ block, pageId, onSelect }) {
   /* --------------------------------------------------
      Text input (live update only)
   -------------------------------------------------- */
-  const handleTextInput =
-    useCallback();
-    // (e) => {
-    //   store.updateBlock(block.id, {
-    //     text: e.target.innerText,
-    //   });
-    // },
-    // [block.id, store]
+  const handleTextInput = useCallback();
+  // (e) => {
+  //   store.updateBlock(block.id, {
+  //     text: e.target.innerText,
+  //   });
+  // },
+  // [block.id, store]
 
   /* --------------------------------------------------
      Text blur → commit + measure ONCE
@@ -143,10 +142,17 @@ function BlockRenderer({ block, pageId, onSelect }) {
   -------------------------------------------------- */
   const style = block.style || {};
 
-  const textStyle = useMemo(
-    () => ({
+  const textStyle = useMemo(() => {
+    const fit = getFit?.();
+    const scale =
+      fit && Number.isFinite(fit.scale) && fit.scale > 0 ? fit.scale : 1;
+
+    return {
       fontFamily: style.fontFamily || "Roboto",
-      fontSize: `calc(${style.fontSize || 18}px * var(--font-scale, 1))`,
+
+      // ✅ THE FIX: scale font by canvas scale
+      fontSize: `${(style.fontSize || 18) * scale}px`,
+
       color: style.color || "#000",
       fontWeight: style.bold ? "700" : "400",
       fontStyle: style.italic ? "italic" : "normal",
@@ -157,7 +163,10 @@ function BlockRenderer({ block, pageId, onSelect }) {
         .filter(Boolean)
         .join(" "),
       textAlign: block.textAlign || "center",
-      lineHeight: style.lineHeight || "1.3",
+
+      // optional but recommended
+      lineHeight: style.lineHeight || 1.3,
+
       width: "100%",
       height: "100%",
       whiteSpace: "pre-wrap",
@@ -165,19 +174,23 @@ function BlockRenderer({ block, pageId, onSelect }) {
       overflowWrap: "break-word",
       overflow: "hidden",
       minWidth: 0,
-    }),
-    [
-      style.fontFamily,
-      style.fontSize,
-      style.color,
-      style.bold,
-      style.italic,
-      style.underline,
-      style.strike,
-      style.lineHeight,
-      block.textAlign,
-    ]
-  );
+
+      transformOrigin: "top left",
+      WebkitFontSmoothing: "antialiased",
+    };
+  }, [
+    style.fontFamily,
+    style.fontSize,
+    style.color,
+    style.bold,
+    style.italic,
+    style.underline,
+    style.strike,
+    style.lineHeight,
+    block.textAlign,
+    getFit,
+  ]);
+
   useLayoutEffect(() => {
     if (block.type !== "text") return;
 
@@ -217,37 +230,54 @@ function BlockRenderer({ block, pageId, onSelect }) {
     isScalingText,
   ]);
 
+  const projectedPosition = useMemo(() => {
+    const x = block.position?.x ?? 0;
+    const y = block.position?.y ?? 0;
+
+    if (!getFit) return { x: 0, y: 0 };
+
+    const fit = getFit();
+    if (!fit || !Number.isFinite(fit.scale)) {
+      return { x: 0, y: 0 };
+    }
+
+    // ⚠️ IMPORTANT:
+    // overlay is already positioned at offsetX / offsetY
+    // so we project ONLY by scale
+    return {
+      x: x * fit.scale,
+      y: y * fit.scale,
+    };
+  }, [block.position?.x, block.position?.y, getFit]);
+
   /* --------------------------------------------------
      Wrapper style (PURE canvas space)
   -------------------------------------------------- */
   const wrapperStyle = useMemo(() => {
-    const x = block.position?.x ?? 0;
-    const y = block.position?.y ?? 0;
     const w = block.size?.width ?? 0;
     const h = block.size?.height ?? 0;
 
     return {
       position: "absolute",
-      left: x,
-      top: y,
-      // width: w,
-      // height: h,
+      left: projectedPosition.x,
+      top: projectedPosition.y,
       opacity: block.opacity ?? 1,
 
       transform: `
-        translate(-50%, -50%)
-        translate3d(var(--drag-x, 0px), var(--drag-y, 0px), 0)
-        rotate(var(--rotate, ${block.rotation ?? 0}deg))
-      `,
+      translate(-50%, -50%)
+      translate3d(var(--drag-x, 0px), var(--drag-y, 0px), 0)
+      rotate(${block.rotation ?? 0}deg)
+    `,
       transformOrigin: "center",
-      width: "var(--resize-w, " + w + "px)",
-      height: "var(--resize-h, " + h + "px)",
+
+      width: `var(--resize-w, ${w}px)`,
+      height: `var(--resize-h, ${h}px)`,
 
       ...buildBlockStyle(block),
     };
   }, [
-    block.position?.x,
-    block.position?.y,
+    projectedPosition.x,
+    projectedPosition.y,
     block.size?.width,
     block.size?.height,
     block.rotation,
@@ -290,6 +320,9 @@ function BlockRenderer({ block, pageId, onSelect }) {
     block.size?.height,
     block.rotation,
   ]);
+
+  console.log("LOGICAL", block.position);
+  console.log("PROJECTED", projectedPosition);
 
   /* --------------------------------------------------
      Render

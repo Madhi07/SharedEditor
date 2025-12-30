@@ -26,6 +26,7 @@ import useCanvasSelection from "../hooks/useCanvasSelection";
 
 const VideoPlayer = forwardRef(function VideoPlayer(
   {
+    mode,
     currentClip,
     currentTime,
     isPlaying,
@@ -33,6 +34,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     onClipEnd,
     onTimeUpdate,
     clips,
+    timelineClips,
     duration,
     onRequestSeek,
     zoom = 1,
@@ -41,8 +43,9 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     onToolbarClose = () => {},
     pageId = "video-page",
   },
-  containerRef // 👈 NEW ref argument
+  containerRef
 ) {
+  const isPreview = mode === "preview";
   const videoRef = useRef(null);
   const playerRef = useRef(null);
   const [localTime, setLocalTime] = useState(0);
@@ -54,17 +57,23 @@ const VideoPlayer = forwardRef(function VideoPlayer(
   // overlay ref used to compute the player rect for toolbar anchoring
   const overlayRef = useRef(null);
 
-  const { selectBlock, activeBlock, selectedIds } = useCanvasSelection({
-    store,
-  });
+  const noop = () => {};
 
+  const { selectBlock, activeBlock } = isPreview
+    ? { selectBlock: noop, activeBlock: null }
+    : useCanvasSelection({ store });
+
+  console.log("videoPlayer clips", clips);
+  console.log("videoPlayer timelineClips", timelineClips);
   const textClipMap = useMemo(() => {
     const map = new Map();
+
     (clips || []).forEach((c) => {
       if (c.type === "text" && c.blockId) {
         map.set(c.blockId, c);
       }
     });
+
     return map;
   }, [clips]);
 
@@ -173,7 +182,13 @@ const VideoPlayer = forwardRef(function VideoPlayer(
 
     if (player.readyState() >= 1) onReady();
     else player.one("loadedmetadata", onReady);
-  }, [currentClip?.id, currentClip?.type, currentClip?.startTime, clips, isPlayerReady]);
+  }, [
+    currentClip?.id,
+    currentClip?.type,
+    currentClip?.startTime,
+    clips,
+    isPlayerReady,
+  ]);
 
   // EFFECT B: Load/Seek for the active clip (no reload when already primed)
   useEffect(() => {
@@ -250,7 +265,14 @@ const VideoPlayer = forwardRef(function VideoPlayer(
         playerRef.current.clipId = currentClip.id;
       }
     }
-  }, [currentClip?.url, currentClip?.relativeTime, currentClip?.id, currentClip?.mimeType, isPlayerReady, isPlaying]);
+  }, [
+    currentClip?.url,
+    currentClip?.relativeTime,
+    currentClip?.id,
+    currentClip?.mimeType,
+    isPlayerReady,
+    isPlaying,
+  ]);
 
   // EFFECT C: React to play/pause toggles (only when current clip’s src is set)
   useEffect(() => {
@@ -311,24 +333,20 @@ const VideoPlayer = forwardRef(function VideoPlayer(
 
   // Manual play toggle
   const handleManualPlay = () => {
-    if (!playerRef.current) {
-      onPlayPause();
-      return;
-    }
-
     const atEnd =
       typeof duration === "number" &&
       typeof currentTime === "number" &&
       currentTime >= duration - EPS_END;
 
     if (atEnd) {
-      // ask parent to move GLOBAL timeline to 0
+      // hard reset FIRST
       if (onRequestSeek) onRequestSeek(0);
 
-      // also reset the HTML5 player if we're on a video
-      try {
-        if (currentClip?.type === "video") playerRef.current.currentTime(0);
-      } catch {}
+      // delay play toggle to next frame
+      requestAnimationFrame(() => {
+        onPlayPause();
+      });
+      return;
     }
 
     onPlayPause();
@@ -375,6 +393,12 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     return unsub;
   }, [store]);
 
+  const logical = store.getPageLogicalSize?.(pageId) ??
+    store.project?.pages?.find((p) => p.id === pageId)?.meta?.logicalSize ?? {
+      width: 1920,
+      height: 1080,
+    }; // final fallback
+
   useEffect(() => {
     if (!stageContainerRef.current || !store) return;
 
@@ -383,10 +407,6 @@ const VideoPlayer = forwardRef(function VideoPlayer(
 
       console.log("RECT BEFORE GUARD", rect);
       if (!rect || rect.width === 0 || rect.height === 0) return;
-
-      const logical = store.getPageLogicalSize?.(pageId) ??
-        store.project?.pages?.find((p) => p.id === pageId)?.meta
-          ?.logicalSize ?? { width: 1920, height: 1080 }; // final fallback
 
       const fitObj = computeMediaFit(
         { width: rect.width, height: rect.height },
@@ -403,11 +423,6 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     window.addEventListener("resize", recomputeFit);
     return () => window.removeEventListener("resize", recomputeFit);
   }, [store, pageId]);
-
-  const logical = store.getPageLogicalSize?.(pageId) ?? {
-    width: 1,
-    height: 1,
-  };
 
   const getFit = useCallback(() => fit, [fit]);
 
@@ -447,12 +462,14 @@ const VideoPlayer = forwardRef(function VideoPlayer(
   }, [getFit]);
 
   const blocks = getBlocks();
+  console.log(
+    "blocks raw",
+    blocks.map((b) => ({ id: b.id, type: b.type }))
+  );
 
-  const { beginInteraction } = useCanvasInteraction({
-    store,
-    pageId,
-    getFit,
-  });
+  const { beginInteraction } = isPreview
+    ? { beginInteraction: () => {} }
+    : useCanvasInteraction({ store, pageId, getFit });
 
   // // Filter blocks to text blocks that should be visible at currentTime
   // const visibleTextBlocks = (blocks || []).filter((b) => {
@@ -474,7 +491,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
   // });
 
   const handleOverlayPointerDown = (e) => {
-    // ✅ IMPORTANT: only handle true canvas clicks
+    // IMPORTANT: only handle true canvas clicks
     if (e.button !== 0) return;
     if (e.target !== e.currentTarget) return;
 
@@ -531,7 +548,13 @@ const VideoPlayer = forwardRef(function VideoPlayer(
   return (
     <div
       ref={containerRef}
-      className="flex flex-col items-center justify-center bg-white rounded-lg p-2 w-[80%] h-[430px] mt-5"
+      style={{
+        height: isPreview ? "100%" : "430px",
+        width: isPreview ? "100%" : "80%",
+        marginTop: isPreview ? "0px" : "20px",
+        borderRadius: isPreview ? "0" : "0.5rem",
+      }}
+      className="flex flex-col items-center justify-center bg-white rounded-lg p-2"
     >
       {/* Video Display */}
       <div
@@ -540,14 +563,17 @@ const VideoPlayer = forwardRef(function VideoPlayer(
           position: "relative",
           background: "white",
           width: "100%",
-          aspectRatio: `${logical.width} / ${logical.height}`,
+          height: isPreview ? "100%" : undefined,
+          aspectRatio: isPreview
+            ? undefined
+            : `${logical.width} / ${logical.height}`,
           overflow: "hidden",
-          pointerEvents: "none",
+          pointerEvents: isPreview ? "none" : "auto",
         }}
         className="rounded-lg mb-2 flex items-center justify-center"
       >
         <div
-          style={{ width: fit.renderWidth,  height: fit.renderHeight, }}
+          style={{ width: fit.renderWidth, height: fit.renderHeight }}
           className="flex items-center justify-center"
         >
           {/* Keep video element mounted for Video.js stability */}
@@ -570,6 +596,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
           {/* ------------------------------------------------------------- */}
           {/*                    CANVAS CLICK LAYER                        */}
           {/* ------------------------------------------------------------- */}
+
           <div
             ref={stageRef}
             style={{
@@ -580,7 +607,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
               height: fit.renderHeight,
               zIndex: 50,
               pointerEvents: "auto",
-               overflow: "hidden"
+              overflow: "hidden",
             }}
           >
             {/* THIS is the real canvas */}
@@ -596,6 +623,13 @@ const VideoPlayer = forwardRef(function VideoPlayer(
               {(blocks || []).map((b) => {
                 if (b.type === "text") {
                   const clip = textClipMap.get(b.id);
+
+                  console.log("TEXT BLOCK CHECK", {
+                    blockId: b.id,
+                    hasClip: !!clip,
+                    currentTime,
+                    clip,
+                  });
                   if (!clip) return null;
 
                   const visible =
@@ -603,6 +637,8 @@ const VideoPlayer = forwardRef(function VideoPlayer(
                       ? currentTime >= clip.startTime &&
                         currentTime < clip.startTime + clip.duration
                       : true;
+
+                  console.log("TEXT VISIBILITY", b.id, visible);
 
                   if (!visible) return null;
                 }
@@ -618,30 +654,33 @@ const VideoPlayer = forwardRef(function VideoPlayer(
                 );
               })}
 
-              {activeBlock && store.activeRect && !store.isDragging && (
-                <>
-                  <SelectionOverlay
-                    block={{ ...activeBlock, __activeRect: store.activeRect }}
-                    beginInteraction={beginInteraction}
-                    onSelect={selectBlock}
-                    getFit={getFit}
-                    cornerHandles={cornerHandles}
-                    sideHandles={
-                      activeBlock.type === "text"
-                        ? textSideHandles
-                        : imageSideHandles
-                    }
-                    onDoubleClick={(e) => {
-                      if (activeBlock?.type === "text") {
-                        e.stopPropagation();
-                        store.setEditingBlock(activeBlock.id);
-                        store.setSelectionMode("text");
+              {!isPreview &&
+                activeBlock &&
+                store.activeRect &&
+                !store.isDragging && (
+                  <>
+                    <SelectionOverlay
+                      block={{ ...activeBlock, __activeRect: store.activeRect }}
+                      beginInteraction={beginInteraction}
+                      onSelect={selectBlock}
+                      getFit={getFit}
+                      cornerHandles={cornerHandles}
+                      sideHandles={
+                        activeBlock.type === "text"
+                          ? textSideHandles
+                          : imageSideHandles
                       }
-                    }}
-                  />
-                  <HelperToolbar />
-                </>
-              )}
+                      onDoubleClick={(e) => {
+                        if (activeBlock?.type === "text") {
+                          e.stopPropagation();
+                          store.setEditingBlock(activeBlock.id);
+                          store.setSelectionMode("text");
+                        }
+                      }}
+                    />
+                    <HelperToolbar />
+                  </>
+                )}
             </div>
           </div>
         </div>

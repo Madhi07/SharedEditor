@@ -60,7 +60,7 @@ export default function exportToMediaData({
   const slides = Array.isArray(slidesSource.slides) ? slidesSource.slides : [];
 
   // ---------- CANVA DATA (SAFE DEFAULTS) ----------
-  const sourceCanva = slidesSource.canva_data || {};
+  const sourceCanva = slidesSource.canvas_data || {};
 
   const activePageId =
     sourceCanva.activePageId ||

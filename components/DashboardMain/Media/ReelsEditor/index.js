@@ -10,6 +10,7 @@ import {
 } from "react";
 import { observer } from "mobx-react-lite";
 import VideoPlayer from "./VideoPlayer";
+import { useVideoEditorCore } from "../utils/videoEditorCore";
 import Timeline from "./Timeline";
 import SelectionToolbar from "../SharedComponent/SelectionToolbar";
 import importTimelineClipsFromMediaData from "../utils/adapters/importFromMediaData";
@@ -43,28 +44,97 @@ async function fetchExternalClips() {
 }
 
 const RealEditor = forwardRef(function RealEditor({ ClipsData }, ref) {
-  const [clips, setClips] = useState([
-    {
-      id: "default-clip",
-      type: "video",
-      url: "/parameters_example.mp4",
-      fileName: "parameters_example.mp4",
-      mimeType: "video/mp4",
-      duration: 10,
-      startTime: 0,
-      endTime: 10,
-      trimStart: 0,
-      trimEnd: 0,
-      hasAudio: true,
-      thumbnail: null,
-      track: 0,
-    },
-  ]);
+  // const [clips, setClips] = useState([
+  //   {
+  //     id: "default-clip",
+  //     type: "video",
+  //     url: "/parameters_example.mp4",
+  //     fileName: "parameters_example.mp4",
+  //     mimeType: "video/mp4",
+  //     duration: 10,
+  //     startTime: 0,
+  //     endTime: 10,
+  //     trimStart: 0,
+  //     trimEnd: 0,
+  //     hasAudio: true,
+  //     thumbnail: null,
+  //     track: 0,
+  //   },
+  // ]);
+  const isPlayingRef = useRef(false);
+
+  const { initialTimelineClips, initialCanvasTextBlocks } = useMemo(() => {
+    if (!ClipsData) {
+      return { initialTimelineClips: [], initialCanvasTextBlocks: [] };
+    }
+
+    try {
+      const result = importTimelineClipsFromMediaData(ClipsData);
+
+      return {
+        initialTimelineClips: result?.clips || [],
+        initialCanvasTextBlocks: result?.textBlocks || [],
+      };
+    } catch {
+      return { initialTimelineClips: [], initialCanvasTextBlocks: [] };
+    }
+  }, [ClipsData]);
+
+  const handleClipEnd = useCallback((endedClipId) => {
+    const visualClips = clipsRef.current
+      .filter((c) => c.type === "video" || c.type === "image")
+      .sort((a, b) => a.startTime - b.startTime);
+
+    const idx = visualClips.findIndex((c) => c.id === endedClipId);
+
+    if (idx !== -1 && idx < visualClips.length - 1) {
+      const nextClip = visualClips[idx + 1];
+
+      setSelectedClipId(nextClip.id);
+
+      const startInside =
+        nextClip.type === "image"
+          ? nextClip.startTime + EPS
+          : nextClip.startTime;
+
+      setCurrentTime(startInside);
+
+      // ✅ SAFE: read from ref, not closure
+      if (isPlayingRef.current) {
+        setTimeout(() => setIsPlaying(true), 50);
+      }
+    } else {
+      setIsPlaying(false);
+      stopAllAudio();
+    }
+  }, []);
+   const canvasStore = useCanvasStoreReactive();
+
+  const {
+    clips,
+    setClips,
+    currentTime,
+    setCurrentTime,
+    isPlaying,
+    setIsPlaying,
+    totalDuration,
+    setTotalDuration,
+    getCurrentClip,
+  } = useVideoEditorCore({
+    initialClips: initialTimelineClips,
+    initialTextBlocks: initialCanvasTextBlocks,
+    onClipEnd: handleClipEnd,
+    canvasStore,
+  });
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
   const pageId = "video-page";
   const [selectedClipId, setSelectedClipId] = useState("default-clip");
-  const [currentTime, setCurrentTime] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [totalDuration, setTotalDuration] = useState(10);
+  // const [currentTime, setCurrentTime] = useState(0);
+  // const [isPlaying, setIsPlaying] = useState(false);
+  // const [totalDuration, setTotalDuration] = useState(10);
   const [importedTextBlocks, setImportedTextBlocks] = useState([]);
   const [videoZoom, setVideoZoom] = useState(1);
   const [seekAudio, setSeekAudio] = useState(0);
@@ -107,7 +177,7 @@ const RealEditor = forwardRef(function RealEditor({ ClipsData }, ref) {
   );
 
   // ----- create shared canvasStore for annotations (single page "video-page") -----
-  const canvasStore = useCanvasStoreReactive();
+ 
 
   // const canvas = useCanvasStoreReactive();
 
@@ -204,7 +274,7 @@ const RealEditor = forwardRef(function RealEditor({ ClipsData }, ref) {
       });
 
       console.log(" EXPORT JSON", exportJson.data);
-      console.log("clipsData Id", ClipsData)
+      console.log("clipsData Id", ClipsData);
 
       const res = await fetch(
         `https://media-v2.episyche.com/media/reels/${ClipsData.id}/`,
@@ -229,19 +299,19 @@ const RealEditor = forwardRef(function RealEditor({ ClipsData }, ref) {
     },
   }));
 
-  useEffect(() => {
-    if (!clips.length) return;
+  // useEffect(() => {
+  //   if (!clips.length) return;
 
-    const visualClips = clips.filter(
-      (c) => c.type === "video" || c.type === "image"
-    );
-    const maxVisualEnd =
-      visualClips.length > 0
-        ? Math.max(...visualClips.map((c) => c.endTime))
-        : 0;
+  //   const visualClips = clips.filter(
+  //     (c) => c.type === "video" || c.type === "image"
+  //   );
+  //   const maxVisualEnd =
+  //     visualClips.length > 0
+  //       ? Math.max(...visualClips.map((c) => c.endTime))
+  //       : 0;
 
-    setTotalDuration(maxVisualEnd);
-  }, [clips]);
+  //   setTotalDuration(maxVisualEnd);
+  // }, [clips]);
 
   // reorder visuals, auto-reflow them sequentially, and update app-state and external JSON
   const commitMoveAndSync = useCallback(
@@ -444,32 +514,32 @@ const RealEditor = forwardRef(function RealEditor({ ClipsData }, ref) {
     // );
   }, []);
 
-  const handleClipEnd = useCallback(
-    (endedClipId) => {
-      const visualClips = clipsRef.current
-        .filter((c) => c.type === "video" || c.type === "image")
-        .sort((a, b) => a.startTime - b.startTime);
+  // const handleClipEnd = useCallback(
+  //   (endedClipId) => {
+  //     const visualClips = clipsRef.current
+  //       .filter((c) => c.type === "video" || c.type === "image")
+  //       .sort((a, b) => a.startTime - b.startTime);
 
-      const idx = visualClips.findIndex((c) => c.id === endedClipId);
+  //     const idx = visualClips.findIndex((c) => c.id === endedClipId);
 
-      if (idx !== -1 && idx < visualClips.length - 1) {
-        const nextClip = visualClips[idx + 1];
+  //     if (idx !== -1 && idx < visualClips.length - 1) {
+  //       const nextClip = visualClips[idx + 1];
 
-        setSelectedClipId(nextClip.id);
-        const startInside =
-          nextClip.type === "image"
-            ? nextClip.startTime + EPS
-            : nextClip.startTime;
-        setCurrentTime(startInside);
+  //       setSelectedClipId(nextClip.id);
+  //       const startInside =
+  //         nextClip.type === "image"
+  //           ? nextClip.startTime + EPS
+  //           : nextClip.startTime;
+  //       setCurrentTime(startInside);
 
-        if (isPlaying) setTimeout(() => setIsPlaying(true), 50);
-      } else {
-        setIsPlaying(false);
-        stopAllAudio();
-      }
-    },
-    [isPlaying, stopAllAudio]
-  );
+  //       if (isPlaying) setTimeout(() => setIsPlaying(true), 50);
+  //     } else {
+  //       setIsPlaying(false);
+  //       stopAllAudio();
+  //     }
+  //   },
+  //   [isPlaying, stopAllAudio]
+  // );
 
   const handleMediaUpload = async (file, type) => {
     const url = URL.createObjectURL(file);
@@ -893,44 +963,44 @@ const RealEditor = forwardRef(function RealEditor({ ClipsData }, ref) {
     }
   };
 
-  const getCurrentClip = useCallback(() => {
-    const visualClips = clips
-      .filter((c) => c.type === "video" || c.type === "image")
-      .sort((a, b) => a.startTime - b.startTime);
+  // const getCurrentClip = useCallback(() => {
+  //   const visualClips = clips
+  //     .filter((c) => c.type === "video" || c.type === "image")
+  //     .sort((a, b) => a.startTime - b.startTime);
 
-    let activeClip = visualClips.find(
-      (c) => currentTime >= c.startTime - EPS && currentTime < c.endTime - EPS
-    );
+  //   let activeClip = visualClips.find(
+  //     (c) => currentTime >= c.startTime - EPS && currentTime < c.endTime - EPS
+  //   );
 
-    if (
-      !activeClip &&
-      currentTime >= totalDuration - EPS &&
-      visualClips.length
-    ) {
-      activeClip = visualClips[visualClips.length - 1];
-    }
-    if (!activeClip) return null;
+  //   if (
+  //     !activeClip &&
+  //     currentTime >= totalDuration - EPS &&
+  //     visualClips.length
+  //   ) {
+  //     activeClip = visualClips[visualClips.length - 1];
+  //   }
+  //   if (!activeClip) return null;
 
-    const relativeTime = Math.max(
-      0,
-      currentTime - activeClip.startTime + activeClip.trimStart
-    );
-    const maxRel =
-      activeClip.duration - activeClip.trimStart - activeClip.trimEnd;
-    const clampedRelativeTime = Math.min(
-      relativeTime,
-      Math.max(0, maxRel - EPS)
-    );
+  //   const relativeTime = Math.max(
+  //     0,
+  //     currentTime - activeClip.startTime + activeClip.trimStart
+  //   );
+  //   const maxRel =
+  //     activeClip.duration - activeClip.trimStart - activeClip.trimEnd;
+  //   const clampedRelativeTime = Math.min(
+  //     relativeTime,
+  //     Math.max(0, maxRel - EPS)
+  //   );
 
-    return {
-      id: activeClip.id,
-      url: activeClip.url,
-      type: activeClip.type,
-      startTime: activeClip.startTime,
-      relativeTime: clampedRelativeTime,
-      hasAudio: activeClip.hasAudio,
-    };
-  }, [currentTime, clips, totalDuration, EPS]);
+  //   return {
+  //     id: activeClip.id,
+  //     url: activeClip.url,
+  //     type: activeClip.type,
+  //     startTime: activeClip.startTime,
+  //     relativeTime: clampedRelativeTime,
+  //     hasAudio: activeClip.hasAudio,
+  //   };
+  // }, [currentTime, clips, totalDuration, EPS]);
 
   useEffect(() => {
     if (clips.length && !selectedClipId) {
@@ -1007,92 +1077,92 @@ const RealEditor = forwardRef(function RealEditor({ ClipsData }, ref) {
     return [...adjusted, ...nonVisuals];
   };
 
-  useEffect(() => {
-    if (!isPlaying) return;
+  // useEffect(() => {
+  //   if (!isPlaying) return;
 
-    let rafId;
-    let lastNow = performance.now();
-    let running = true;
+  //   let rafId;
+  //   let lastNow = performance.now();
+  //   let running = true;
 
-    const visualsSorted = () =>
-      clipsRef.current
-        .filter((c) => c.type === "video" || c.type === "image")
-        .sort((a, b) => a.startTime - b.startTime);
+  //   const visualsSorted = () =>
+  //     clipsRef.current
+  //       .filter((c) => c.type === "video" || c.type === "image")
+  //       .sort((a, b) => a.startTime - b.startTime);
 
-    const findActiveAt = (t, visuals) =>
-      visuals.find((c) => t >= c.startTime - EPS && t < c.endTime - EPS);
+  //   const findActiveAt = (t, visuals) =>
+  //     visuals.find((c) => t >= c.startTime - EPS && t < c.endTime - EPS);
 
-    const tick = (now) => {
-      if (!running) return;
+  //   const tick = (now) => {
+  //     if (!running) return;
 
-      let dt = (now - lastNow) / 1000;
-      if (dt > MAX_DT) dt = MAX_DT;
-      lastNow = now;
+  //     let dt = (now - lastNow) / 1000;
+  //     if (dt > MAX_DT) dt = MAX_DT;
+  //     lastNow = now;
 
-      setCurrentTime((prev) => {
-        const visuals = visualsSorted();
-        if (!visuals.length) return prev;
+  //     setCurrentTime((prev) => {
+  //       const visuals = visualsSorted();
+  //       if (!visuals.length) return prev;
 
-        const active = findActiveAt(prev, visuals);
+  //       const active = findActiveAt(prev, visuals);
 
-        if (!active) {
-          // ---- FIX: if there is no active visual but currentTime is before the first visual,
-          // advance into the first visual instead of jumping to the end.
-          const firstVisual = visuals[0];
-          const lastVisualEnd = Math.max(...visuals.map((c) => c.endTime));
-          if (prev < firstVisual.startTime + EPS) {
-            // move to first visual start (small EPS to avoid image-first-time edge)
-            lastVisualIdRef.current = firstVisual.id;
-            return Math.max(prev, firstVisual.startTime + EPS);
-          }
+  //       if (!active) {
+  //         // ---- FIX: if there is no active visual but currentTime is before the first visual,
+  //         // advance into the first visual instead of jumping to the end.
+  //         const firstVisual = visuals[0];
+  //         const lastVisualEnd = Math.max(...visuals.map((c) => c.endTime));
+  //         if (prev < firstVisual.startTime + EPS) {
+  //           // move to first visual start (small EPS to avoid image-first-time edge)
+  //           lastVisualIdRef.current = firstVisual.id;
+  //           return Math.max(prev, firstVisual.startTime + EPS);
+  //         }
 
-          // otherwise assume we truly reached the end -> stop and set to end
-          running = false;
-          setIsPlaying(false);
-          return lastVisualEnd;
-        }
+  //         // otherwise assume we truly reached the end -> stop and set to end
+  //         running = false;
+  //         setIsPlaying(false);
+  //         return lastVisualEnd;
+  //       }
 
-        if (active.type !== "image") {
-          enteredImageRef.current = false;
-          lastVisualIdRef.current = active.id;
-          return prev;
-        }
+  //       if (active.type !== "image") {
+  //         enteredImageRef.current = false;
+  //         lastVisualIdRef.current = active.id;
+  //         return prev;
+  //       }
 
-        const firstTimeOnThisImage =
-          lastVisualIdRef.current !== active.id || !enteredImageRef.current;
-        if (firstTimeOnThisImage) {
-          enteredImageRef.current = true;
-          lastVisualIdRef.current = active.id;
-          return Math.max(prev, active.startTime + EPS);
-        }
+  //       const firstTimeOnThisImage =
+  //         lastVisualIdRef.current !== active.id || !enteredImageRef.current;
+  //       if (firstTimeOnThisImage) {
+  //         enteredImageRef.current = true;
+  //         lastVisualIdRef.current = active.id;
+  //         return Math.max(prev, active.startTime + EPS);
+  //       }
 
-        const nextT = prev + dt;
-        const imgEnd = active.endTime - EPS;
+  //       const nextT = prev + dt;
+  //       const imgEnd = active.endTime - EPS;
 
-        if (nextT < imgEnd) return nextT;
+  //       if (nextT < imgEnd) return nextT;
 
-        const idx = visuals.findIndex((c) => c.id === active.id);
-        if (idx >= 0 && idx < visuals.length - 1) {
-          const nxt = visuals[idx + 1];
-          enteredImageRef.current = false;
-          lastVisualIdRef.current = nxt.id;
-          return nxt.type === "image" ? nxt.startTime + EPS : nxt.startTime;
-        }
+  //       const idx = visuals.findIndex((c) => c.id === active.id);
+  //       if (idx >= 0 && idx < visuals.length - 1) {
+  //         const nxt = visuals[idx + 1];
+  //         enteredImageRef.current = false;
+  //         lastVisualIdRef.current = nxt.id;
+  //         return nxt.type === "image" ? nxt.startTime + EPS : nxt.startTime;
+  //       }
 
-        running = false;
-        setIsPlaying(false);
-        return active.endTime;
-      });
+  //       running = false;
+  //       setIsPlaying(false);
+  //       return active.endTime;
+  //     });
 
-      rafId = requestAnimationFrame(tick);
-    };
+  //     rafId = requestAnimationFrame(tick);
+  //   };
 
-    rafId = requestAnimationFrame(tick);
-    return () => {
-      running = false;
-      if (rafId) cancelAnimationFrame(rafId);
-    };
-  }, [isPlaying]);
+  //   rafId = requestAnimationFrame(tick);
+  //   return () => {
+  //     running = false;
+  //     if (rafId) cancelAnimationFrame(rafId);
+  //   };
+  // }, [isPlaying]);
 
   // --- NEW: auto-select active visual clip but respect recent manual clicks
   useEffect(() => {
@@ -1245,7 +1315,12 @@ const RealEditor = forwardRef(function RealEditor({ ClipsData }, ref) {
     const { clips: importedClips, textBlocks: importedCanvasTextBlocks } =
       importTimelineClipsFromMediaData(ClipsData);
 
-    console.log("import", importedClips , "text Blocks", importedCanvasTextBlocks)
+    console.log(
+      "import",
+      importedClips,
+      "text Blocks",
+      importedCanvasTextBlocks
+    );
 
     setImportedTextBlocks(importedCanvasTextBlocks || []);
 

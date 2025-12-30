@@ -1018,6 +1018,7 @@ export default function Timeline({
                   (() => {
                     const block = textBlockMap?.get(clip.blockId);
                     const text = block?.text || "Text";
+                    console.log("block text", block?.text)
 
                     return (
                       <div className="absolute inset-0 flex items-center justify-center px-3 text-white text-sm font-medium text-center pointer-events-none">
@@ -1038,7 +1039,7 @@ export default function Timeline({
                               : block?.style?.strike
                               ? "line-through"
                               : "none",
-                            color: block?.style?.color || "#000",
+                            color: "#000",
                             textAlign: block?.textAlign || "center",
                             whiteSpace: "pre-wrap",
                             wordBreak: "break-word",
